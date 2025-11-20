@@ -1,0 +1,305 @@
+
+import React, { useState, useEffect, useRef } from 'react';
+import { editImageWithAI, removeBackgroundImage } from '../services/mockApi';
+
+interface PaintStyleEditorModalProps {
+    imageSrc: string; // base64 without prefix
+    onClose: () => void;
+    onSave: (newImage: string) => void;
+}
+
+type Message = { sender: 'user' | 'ai' | 'system'; text: string; };
+
+const PaintStyleEditorModal: React.FC<PaintStyleEditorModalProps> = ({ imageSrc, onClose, onSave }) => {
+    const [currentImage, setCurrentImage] = useState(imageSrc);
+    const [chatHistory, setChatHistory] = useState<Message[]>([]);
+    const [userInput, setUserInput] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    
+    // Canvas/Masking State
+    const [isDrawing, setIsDrawing] = useState(false);
+    const [brushSize, setBrushSize] = useState(20);
+    const [tool, setTool] = useState<'brush' | 'eraser'>('brush');
+    
+    const chatHistoryRef = useRef<HTMLDivElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const imageRef = useRef<HTMLImageElement>(null);
+
+    useEffect(() => {
+        setChatHistory([{ sender: 'system', text: 'Выделите область маркером и опишите, что изменить.' }]);
+    }, []);
+
+    useEffect(() => {
+        chatHistoryRef.current?.scrollTo({ top: chatHistoryRef.current.scrollHeight, behavior: 'smooth' });
+    }, [chatHistory, isLoading]);
+
+    // Initialize Canvas Size to match Image
+    useEffect(() => {
+        if (imageRef.current && canvasRef.current) {
+             const updateCanvasSize = () => {
+                if (imageRef.current && canvasRef.current) {
+                    canvasRef.current.width = imageRef.current.width;
+                    canvasRef.current.height = imageRef.current.height;
+                }
+             };
+             setTimeout(updateCanvasSize, 100);
+             window.addEventListener('resize', updateCanvasSize);
+             return () => window.removeEventListener('resize', updateCanvasSize);
+        }
+    }, [currentImage]);
+
+    const getMaskBase64 = (): string | null => {
+        const canvas = canvasRef.current;
+        if (!canvas) return null;
+        
+        const maskCanvas = document.createElement('canvas');
+        maskCanvas.width = canvas.width;
+        maskCanvas.height = canvas.height;
+        const ctx = maskCanvas.getContext('2d');
+        if (!ctx) return null;
+        
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+        
+        ctx.drawImage(canvas, 0, 0);
+        
+        ctx.globalCompositeOperation = 'source-in';
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+        
+        return maskCanvas.toDataURL('image/png').split(',')[1];
+    }
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!userInput.trim() || isLoading) return;
+
+        const newHistory: Message[] = [...chatHistory, { sender: 'user', text: userInput }];
+        setChatHistory(newHistory);
+        const prompt = userInput;
+        setUserInput('');
+        setIsLoading(true);
+
+        const mask = getMaskBase64();
+        const hasMask = mask && isCanvasDirty();
+
+        try {
+            const result = await editImageWithAI(currentImage, prompt, hasMask ? mask : undefined);
+            setCurrentImage(result.image);
+            setChatHistory([...newHistory, { sender: 'ai', text: 'Готово. Вы можете продолжить редактирование.' }]);
+            clearCanvas();
+        } catch (error: any) {
+            setChatHistory([...newHistory, { sender: 'system', text: `Ошибка: ${error.message}` }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleRemoveBg = async () => {
+        setIsLoading(true);
+        setChatHistory(prev => [...prev, {sender: 'system', text: 'Чистка фона...'}]);
+        try {
+            const result = await removeBackgroundImage(currentImage, 'image/png');
+            setCurrentImage(result);
+            setChatHistory(prev => [...prev, {sender: 'ai', text: 'Фон удален.'}]);
+        } catch (error: any) {
+             setChatHistory(prev => [...prev, { sender: 'system', text: `Ошибка: ${error.message}` }]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+        if (isLoading) return;
+        setIsDrawing(true);
+        draw(e);
+    };
+
+    const stopDrawing = () => {
+        setIsDrawing(false);
+        const ctx = canvasRef.current?.getContext('2d');
+        if (ctx) ctx.beginPath();
+    };
+
+    const draw = (e: React.MouseEvent | React.TouchEvent) => {
+        if (!isDrawing || !canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const rect = canvas.getBoundingClientRect();
+        let clientX, clientY;
+        
+        if ('touches' in e) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            clientX = (e as React.MouseEvent).clientX;
+            clientY = (e as React.MouseEvent).clientY;
+        }
+
+        const x = (clientX - rect.left) * (canvas.width / rect.width);
+        const y = (clientY - rect.top) * (canvas.height / rect.height);
+
+        ctx.lineWidth = brushSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        if (tool === 'eraser') {
+            ctx.globalCompositeOperation = 'destination-out';
+        } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; // White selection for visibility on dark bg
+        }
+
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    };
+
+    const clearCanvas = () => {
+        const canvas = canvasRef.current;
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    };
+    
+    const isCanvasDirty = () => {
+         const canvas = canvasRef.current;
+         if(!canvas) return false;
+         const ctx = canvas.getContext('2d');
+         if(!ctx) return false;
+         const p = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+         for(let i=0; i<p.length; i+=4) {
+             if(p[i+3] !== 0) return true;
+         }
+         return false;
+    }
+
+    const handleSave = () => onSave(currentImage);
+
+    return (
+        <div style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.8)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '10px'
+        }} onClick={onClose}>
+            <div className="card" style={{
+                 width: '100%', maxWidth: '800px', height: '100%', maxHeight: '90vh',
+                 display: 'flex', flexDirection: 'column', padding: 0, margin: 0,
+                 overflow: 'hidden', backgroundColor: 'black', border: '1px solid white'
+            }} onClick={(e) => e.stopPropagation()}>
+                
+                <header style={{padding: '10px', borderBottom: '1px solid white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#000'}}>
+                    <div className="flex items-center gap-4">
+                        <h2 className="text-lg font-bold uppercase">AI EDITOR</h2>
+                        <div className="flex gap-1">
+                            <button 
+                                className={`px-2 py-1 text-xs border ${tool === 'brush' ? 'bg-white text-black' : 'border-white text-white'}`}
+                                onClick={() => setTool('brush')}
+                            >
+                                МАРКЕР
+                            </button>
+                             <button 
+                                className={`px-2 py-1 text-xs border ${tool === 'eraser' ? 'bg-white text-black' : 'border-white text-white'}`}
+                                onClick={() => setTool('eraser')}
+                            >
+                                ЛАСТИК
+                            </button>
+                             <button className="px-2 py-1 text-xs border border-white text-white" onClick={clearCanvas}>
+                                СБРОС
+                            </button>
+                        </div>
+                         <input 
+                            type="range" min="5" max="50" 
+                            value={brushSize} 
+                            onChange={(e) => setBrushSize(Number(e.target.value))}
+                            className="w-24 accent-white"
+                        />
+                    </div>
+                    <button className="text-xs border border-white px-2 py-1 text-white" onClick={handleRemoveBg} disabled={isLoading}>[ AUTO DEL BG ]</button>
+                </header>
+
+                <main style={{flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative'}}>
+                    <div 
+                        ref={containerRef}
+                        style={{
+                            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                            backgroundColor: '#111', 
+                            backgroundImage: "url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzjDgBdQBJoGQRgFQAyiKKQAH54X0h8I3nAAAAAASUVORK5CYII=')", 
+                            padding: '10px',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            touchAction: 'none'
+                        }}
+                    >
+                        <div style={{position: 'relative', display: 'inline-block'}}>
+                            <img 
+                                ref={imageRef}
+                                src={`data:image/png;base64,${currentImage}`} 
+                                alt="Edit Target" 
+                                style={{maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', display: 'block', pointerEvents: 'none'}} 
+                                onLoad={() => {
+                                    if(canvasRef.current && imageRef.current) {
+                                        canvasRef.current.width = imageRef.current.width;
+                                        canvasRef.current.height = imageRef.current.height;
+                                    }
+                                }}
+                            />
+                            <canvas 
+                                ref={canvasRef}
+                                onMouseDown={startDrawing}
+                                onMouseMove={draw}
+                                onMouseUp={stopDrawing}
+                                onMouseLeave={stopDrawing}
+                                onTouchStart={startDrawing}
+                                onTouchMove={draw}
+                                onTouchEnd={stopDrawing}
+                                style={{
+                                    position: 'absolute', 
+                                    top: 0, left: 0, 
+                                    width: '100%', height: '100%', 
+                                    cursor: 'crosshair'
+                                }}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div style={{height: '30%', minHeight: '150px', display: 'flex', flexDirection: 'column', borderTop: '1px solid white', backgroundColor: '#000', padding: '10px'}}>
+                        <div ref={chatHistoryRef} style={{flex: 1, overflowY: 'auto', marginBottom: '10px', fontSize: '12px'}}>
+                            {chatHistory.map((msg, index) => (
+                                <div key={index} className="mb-1">
+                                    <span className="font-bold text-white">{msg.sender === 'user' ? '>' : '#'} </span>
+                                    <span className="text-white">{msg.text}</span>
+                                </div>
+                            ))}
+                            {isLoading && <div className="blink text-white">PROCESSING...</div>}
+                        </div>
+                        
+                        <form onSubmit={handleSubmit} style={{display: 'flex', gap: '5px'}}>
+                            <input 
+                                type="text" 
+                                value={userInput} 
+                                onChange={e => setUserInput(e.target.value)} 
+                                className="input-field" 
+                                style={{padding: '8px'}}
+                                disabled={isLoading} 
+                                placeholder="Опишите изменения..."
+                            />
+                            <button type="submit" className="button" style={{width: 'auto', padding: '0 15px'}} disabled={!userInput.trim() || isLoading}>SEND</button>
+                        </form>
+                    </div>
+                </main>
+                
+                <footer style={{display: 'flex', gap: '10px', padding: '10px', borderTop: '1px solid white', backgroundColor: '#000'}}>
+                    <button className="button secondary" style={{flex: 1}} onClick={onClose}>CANCEL</button>
+                    <button className="button" style={{flex: 1}} onClick={handleSave}>SAVE RESULT</button>
+                </footer>
+            </div>
+        </div>
+    );
+};
+
+export default PaintStyleEditorModal;
