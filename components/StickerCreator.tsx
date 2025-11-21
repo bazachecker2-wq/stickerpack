@@ -44,6 +44,9 @@ const StickerCreator: React.FC = () => {
     // AI Chat State
     const [chatMessages, setChatMessages] = useState<{sender: 'ai'|'user'|'system', text: string}[]>([]);
     const [isAiProcessing, setIsAiProcessing] = useState(false);
+    
+    // Mobile UI State
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(true);
 
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -134,6 +137,8 @@ const StickerCreator: React.FC = () => {
                 setCanvasHistory([]); // Reset history on new file
                 setStep('selection');
                 setChatMessages(prev => [...prev, { sender: 'system', text: 'Изображение загружено. Рекомендую сначала нажать "СТИЛИЗАЦИЯ".' }]);
+                // On mobile, auto open menu to show next steps
+                if (window.innerWidth < 768) setIsMobileMenuOpen(true);
             };
             reader.readAsDataURL(file);
         }
@@ -156,6 +161,9 @@ const StickerCreator: React.FC = () => {
         
         setIsAiProcessing(true);
         setChatMessages(prev => [...prev, { sender: 'ai', text: `Применяю стиль "${stickerStyle}" (Сила: ${creativityLevel}%)...` }]);
+        
+        // Close mobile menu to show result
+        if (window.innerWidth < 768) setIsMobileMenuOpen(false);
 
         try {
             const base64Data = processedImage.split(',')[1];
@@ -180,6 +188,7 @@ const StickerCreator: React.FC = () => {
         }
         setIsAiProcessing(true);
         setChatMessages(prev => [...prev, { sender: 'ai', text: `Генерирую варианты персонажа...` }]);
+        if (window.innerWidth < 768) setIsMobileMenuOpen(false);
         
         try {
             const results = await generateCharacterCandidates(characterPrompt, stickerStyle);
@@ -198,6 +207,7 @@ const StickerCreator: React.FC = () => {
         setProcessedImage(src);
         setStep('selection');
         setChatMessages(prev => [...prev, { sender: 'ai', text: 'Отлично! Теперь выберите количество стикеров и нажмите "Создать Пак".' }]);
+        if (window.innerWidth < 768) setIsMobileMenuOpen(true);
     };
 
     // --- STEP 3: PREPARE & GENERATE PACK ---
@@ -207,6 +217,7 @@ const StickerCreator: React.FC = () => {
         setStep('pack');
         setIsAiProcessing(true);
         setGenerationProgress(0);
+        if (window.innerWidth < 768) setIsMobileMenuOpen(false);
 
         // 1. Initialize placeholders with "Pending" status
         const initialStickers: StickerItem[] = Array.from({ length: stickerCount }, (_, i) => {
@@ -315,12 +326,18 @@ const StickerCreator: React.FC = () => {
     );
 
     return (
-        <div className="flex flex-col h-full md:h-[calc(100vh-100px)] bg-white border-2 border-black shadow-[8px_8px_0px_black] m-2 md:m-0">
+        <div className="flex flex-col h-full bg-white border-2 border-black shadow-none md:shadow-[8px_8px_0px_black] m-0 md:m-0 overflow-hidden">
             {/* TOP BAR */}
-            <div className="h-16 md:h-14 bg-white border-b-2 border-black flex items-center justify-between px-2 md:px-4 shrink-0 z-20 relative">
-                <div className="flex gap-2">
+            <div className="h-14 bg-white border-b-2 border-black flex items-center justify-between px-3 shrink-0 z-20 relative">
+                <div className="flex gap-2 items-center">
                     <TopBarButton onClick={handleNewCanvas} label="Новый" />
                     <TopBarButton onClick={() => fileInputRef.current?.click()} label="Открыть" />
+                    <button 
+                        onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                        className="md:hidden px-3 py-2 font-bold uppercase text-[10px] border-2 border-black bg-yellow-300 ml-1 active:translate-y-0.5"
+                    >
+                        {isMobileMenuOpen ? 'СКРЫТЬ МЕНЮ' : 'НАСТРОЙКИ'}
+                    </button>
                 </div>
                 {step === 'pack' && isAiProcessing && (
                      <div className="flex-1 mx-2 md:mx-8 max-w-md flex flex-col justify-center">
@@ -339,11 +356,17 @@ const StickerCreator: React.FC = () => {
                 </div>
             </div>
 
-            <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+            <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
                 
-                {/* RIGHT SIDEBAR (Control Panel) - Ordered first on mobile for visibility */}
-                <div className="w-full md:w-72 bg-white border-b-2 md:border-b-0 md:border-l-2 border-black flex flex-col shrink-0 z-10 shadow-none md:shadow-[-4px_0px_0px_rgba(0,0,0,0.1)] order-1 md:order-2 max-h-[35vh] md:max-h-none overflow-y-auto">
-                    <div className="flex flex-col bg-yellow-50 min-h-full">
+                {/* RIGHT SIDEBAR (Control Panel) */}
+                <div className={`
+                    w-full md:w-72 bg-white border-b-2 md:border-b-0 md:border-l-2 border-black flex flex-col shrink-0 z-30 
+                    shadow-lg md:shadow-none order-1 md:order-2 
+                    transition-all duration-300 ease-in-out
+                    ${isMobileMenuOpen ? 'max-h-[50vh] border-b-2' : 'max-h-0 border-b-0'} 
+                    md:max-h-none overflow-hidden md:overflow-y-auto
+                `}>
+                    <div className="flex flex-col bg-yellow-50 min-h-full overflow-y-auto">
                         <div className="bg-black text-white p-2 font-bold text-xs uppercase border-b-2 border-white tracking-wider flex items-center justify-between sticky top-0 z-10">
                             <div className="flex items-center gap-2">
                                 <PackIcon className="w-4 h-4"/>
@@ -437,8 +460,8 @@ const StickerCreator: React.FC = () => {
                             </div>
                         </div>
                         
-                        {/* AI LOG - Hidden on small screens to save space, or minimal */}
-                        <div className="flex-1 flex flex-col bg-white border-t-2 border-black hidden md:flex">
+                        {/* AI LOG */}
+                        <div className="flex-1 flex flex-col bg-white border-t-2 border-black">
                              <div className="bg-black text-white p-2 font-bold text-xs uppercase">ЖУРНАЛ AI</div>
                              <div className="flex-1 p-3 overflow-y-auto space-y-2 font-mono text-[10px] bg-[#f0f0f0] min-h-[100px]">
                                 {chatMessages.map((msg, i) => (
@@ -471,7 +494,7 @@ const StickerCreator: React.FC = () => {
 
                     {/* EDITOR / PACK VIEW */}
                     {(step === 'init' || step === 'selection' || step === 'pack') && (
-                        <div className="w-full max-w-4xl flex flex-col gap-4 md:gap-8 items-center pb-10">
+                        <div className="w-full max-w-4xl flex flex-col gap-4 md:gap-8 items-center pb-20 md:pb-10">
                             {/* Reference Canvas */}
                             <div className={`bg-white shadow-[4px_4px_0px_rgba(0,0,0,1)] md:shadow-[8px_8px_0px_rgba(0,0,0,1)] border-2 border-black relative shrink-0 transition-all ${step === 'pack' ? 'w-48 h-48 md:w-64 md:h-64' : 'w-full max-w-[600px] aspect-square'}`}>
                                 <div className="absolute top-0 left-0 w-full flex justify-between p-2 pointer-events-none z-10">

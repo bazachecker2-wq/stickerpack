@@ -72,10 +72,16 @@ const StickerEditorModal: React.FC<StickerEditorModalProps> = ({ stickerData, on
     };
 
     return (
-        <div className="fixed inset-0 z-[2000] bg-white/95 flex flex-col md:flex-row p-2 md:p-4 gap-2 md:gap-4 overflow-y-auto md:overflow-hidden">
+        <div className="fixed inset-0 z-[2000] bg-white/95 flex flex-col md:flex-row p-0 md:p-4 gap-0 md:gap-4 overflow-hidden">
+            {/* Mobile Header */}
+            <div className="md:hidden p-3 bg-black text-white font-bold uppercase flex justify-between items-center text-sm shrink-0">
+                 <span>AI Редактор</span>
+                 <button onClick={onClose} className="text-white px-2 font-mono text-lg">✕</button>
+            </div>
+
             {/* Image Preview Area */}
-            <div className="flex-1 min-h-[40vh] md:h-auto flex flex-col bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzjDgBdQBJoGQRgFQAyiKKQAH54X0h8I3nAAAAAASUVORK5CYII=')] border-2 border-black shadow-[4px_4px_0px_black] md:shadow-[8px_8px_0px_black]">
-                <div className="flex-1 flex items-center justify-center p-4 md:p-8 relative overflow-hidden">
+            <div className="flex-1 flex flex-col bg-white border-b-2 md:border-2 border-black shadow-none md:shadow-[8px_8px_0px_black] min-h-0">
+                <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzjDgBdQBJoGQRgFQAyiKKQAH54X0h8I3nAAAAAASUVORK5CYII=')]">
                     {/* Image Display */}
                     <img 
                         src={isComparing ? originalImage : currentImage} 
@@ -99,9 +105,9 @@ const StickerEditorModal: React.FC<StickerEditorModalProps> = ({ stickerData, on
                         </div>
                     )}
                 </div>
-                <div className="p-2 md:p-4 bg-white border-t-2 border-black flex justify-between items-center">
+                <div className="p-2 md:p-4 bg-white border-t-2 border-black flex justify-between items-center shrink-0">
                     <div className="font-bold uppercase text-xs md:text-sm flex items-center gap-2">
-                        <span>Эмоция:</span>
+                        <span className="hidden md:inline">Эмоция:</span>
                         <span className="bg-black text-white px-2 py-1">{stickerData.emotion}</span>
                     </div>
                     <div className="flex gap-2">
@@ -136,8 +142,8 @@ const StickerEditorModal: React.FC<StickerEditorModalProps> = ({ stickerData, on
             </div>
 
             {/* Chat / Controls Area */}
-            <div className="w-full md:w-96 h-[50vh] md:h-auto flex flex-col border-2 border-black bg-white shadow-[4px_4px_0px_black] md:shadow-[8px_8px_0px_black]">
-                <div className="p-3 bg-black text-white font-bold uppercase flex justify-between items-center text-sm">
+            <div className="w-full md:w-96 flex flex-col border-t-2 md:border-2 border-black bg-white shadow-none md:shadow-[8px_8px_0px_black] h-[45vh] md:h-auto shrink-0">
+                <div className="hidden md:flex p-3 bg-black text-white font-bold uppercase justify-between items-center text-sm">
                     <span>AI Редактор</span>
                     <button onClick={onClose} className="text-white hover:text-gray-300 px-2 font-mono text-lg">✕</button>
                 </div>
@@ -153,7 +159,7 @@ const StickerEditorModal: React.FC<StickerEditorModalProps> = ({ stickerData, on
                     <div ref={chatEndRef} />
                 </div>
 
-                <form onSubmit={handleSend} className="p-3 border-t-2 border-black bg-white flex gap-2">
+                <form onSubmit={handleSend} className="p-3 border-t-2 border-black bg-white flex gap-2 shrink-0">
                     <input 
                         type="text" 
                         className="input-field flex-1 text-sm" 
@@ -165,7 +171,7 @@ const StickerEditorModal: React.FC<StickerEditorModalProps> = ({ stickerData, on
                     <button type="submit" className="button px-3 bg-black text-white" disabled={isLoading}>→</button>
                 </form>
 
-                <div className="p-3 border-t-2 border-black bg-gray-100">
+                <div className="p-3 border-t-2 border-black bg-gray-100 shrink-0 safe-area-bottom">
                     <button onClick={handleSave} className="button w-full bg-green-500 text-white border-black hover:bg-green-600 text-xs md:text-sm py-3 font-bold">
                         СОХРАНИТЬ ИЗМЕНЕНИЯ
                     </button>

@@ -92,7 +92,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ session, onLogout, language, se
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', backgroundColor: '#F8F8F8', color: '#000', overflow: 'hidden' }}>
+    <div className="flex h-screen bg-[#F8F8F8] text-black overflow-hidden flex-col md:flex-row">
       <Sidebar
         sessionType={session.type}
         activeView={activeView}
@@ -102,53 +102,28 @@ const MainLayout: React.FC<MainLayoutProps> = ({ session, onLogout, language, se
         setIsOpen={setSidebarOpen}
         language={language}
       />
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-        <header style={{
-            display: 'flex',
-            alignItems: 'center',
-            padding: '16px 24px',
-            backgroundColor: '#FFFFFF',
-            borderBottom: '3px solid #000000',
-            zIndex: 10,
-            justifyContent: 'space-between'
-        }}>
-             <div style={{display: 'flex', alignItems: 'center'}}>
+      <main className="flex-1 flex flex-col overflow-hidden relative w-full">
+        <header className="flex items-center justify-between p-3 md:p-6 bg-white border-b-[3px] border-black z-10 shrink-0">
+             <div className="flex items-center">
                 <button 
                     onClick={() => setSidebarOpen(!isSidebarOpen)} 
-                    className="button"
-                    style={{ padding: '0', minWidth: '40px', height: '40px', minHeight: '40px', marginRight: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 0 }}
+                    className="button md:hidden mr-4 p-0 min-w-[40px] h-10 flex items-center justify-center rounded-none"
                 >
                     {isSidebarOpen ? <CloseIcon className="h-6 w-6" /> : <MenuIcon className="h-6 w-6" />}
                 </button>
-                <h1 style={{ fontSize: '28px', fontWeight: 900, margin: 0, letterSpacing: '-1px' }}>
+                <h1 className="text-xl md:text-3xl font-black m-0 tracking-tighter truncate">
                      {viewTitles[activeView]}
                 </h1>
             </div>
-            <div style={{display: 'flex', gap: '20px', alignItems: 'center'}}>
-                 <div style={{display: 'flex', border: '2px solid black', borderRadius: '0px', overflow: 'hidden'}}>
+            <div className="flex gap-2 md:gap-5 items-center">
+                 <div className="flex border-2 border-black rounded-none overflow-hidden shrink-0">
                     <button 
                         onClick={() => setLanguage('ru')} 
-                        style={{
-                            background: language === 'ru' ? 'black' : 'white', 
-                            color: language === 'ru' ? 'white' : 'black',
-                            border: 'none', 
-                            padding: '5px 10px',
-                            cursor: 'pointer', 
-                            fontWeight: 'bold',
-                            fontFamily: 'var(--font-heading)'
-                        }}
+                        className={`px-2 py-1 md:px-3 md:py-1 font-bold font-heading cursor-pointer text-xs md:text-sm ${language === 'ru' ? 'bg-black text-white' : 'bg-white text-black'}`}
                     >RU</button>
                     <button 
                         onClick={() => setLanguage('en')} 
-                        style={{
-                            background: language === 'en' ? 'black' : 'white', 
-                            color: language === 'en' ? 'white' : 'black',
-                            border: 'none', 
-                            padding: '5px 10px',
-                            cursor: 'pointer', 
-                            fontWeight: 'bold',
-                             fontFamily: 'var(--font-heading)'
-                        }}
+                        className={`px-2 py-1 md:px-3 md:py-1 font-bold font-heading cursor-pointer text-xs md:text-sm ${language === 'en' ? 'bg-black text-white' : 'bg-white text-black'}`}
                     >EN</button>
                  </div>
                 <div className="hidden md:flex items-center font-bold text-xs border-2 border-black px-3 py-1 uppercase bg-green-400 text-black shadow-[2px_2px_0px_black]">
@@ -156,10 +131,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ session, onLogout, language, se
                 </div>
             </div>
         </header>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
+        <div className="flex-1 overflow-y-auto p-2 md:p-6 w-full">
           <Suspense fallback={
             <div className="h-full w-full flex flex-col items-center justify-center text-black">
-                <div className="text-4xl font-black animate-bounce">LOADING...</div>
+                <div className="text-2xl md:text-4xl font-black animate-bounce">LOADING...</div>
                 <div className="mt-4 border-2 border-black w-48 h-4 p-0.5"><div className="h-full bg-black animate-pulse w-full"></div></div>
             </div>
           }>
