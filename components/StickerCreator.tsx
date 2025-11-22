@@ -1,20 +1,17 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import { removeBackgroundImage, generateCharacterCandidates, generateSingleSticker, stylizeImage, askStudioAssistant } from '../services/mockApi';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { removeBackgroundImage, generateSingleSticker, editImageWithAI, generateEmojiVariants, animateEmoji } from '../services/mockApi';
 import PackIcon from './icons/PackIcon';
 import StickerEditorModal from './StickerEditorModal';
 import PaintStyleEditorModal from './PaintStyleEditorModal';
-import StickerPreviewModal from './StickerPreviewModal';
 import UndoIcon from './icons/UndoIcon';
-import SettingsIcon from './icons/SettingsIcon';
 import DownloadIcon from './icons/DownloadIcon';
-import EditIcon from './icons/EditIcon';
-import SendIcon from './icons/SendIcon';
+import CameraIcon from './icons/CameraIcon';
+import AnimationIcon from './icons/AnimationIcon';
 import { translations } from '../utils/translations';
 
 // Types
-type WorkflowStep = 'init' | 'candidates' | 'selection' | 'pack';
-type ChatContext = 'idle' | 'confirm_bg_removal' | 'choose_style' | 'confirm_pack';
+type WorkflowStep = 'init' | 'candidates' | 'selection' | 'style_preview' | 'pack';
 
 interface StickerItem {
     id: string;
@@ -39,7 +36,34 @@ interface CanvasLayer {
     height: number;
     rotation: number;
     zIndex: number;
-    imgElement: HTMLImageElement | null; // Cache for performance
+    imgElement: HTMLImageElement | null;
+}
+
+interface TargetProfile {
+    id: string;
+    name: string;
+    threatLevel: string;
+    species: string;
+    notes: string;
+    signature: number;
+}
+
+interface TrackedObject {
+    id: number;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    z: number; // Depth estimation
+    label: string;
+    life: number;
+    profileId?: string; // Linked known profile
+    smoothX: number; // For stabilization
+    smoothY: number; 
+    smoothW: number;
+    smoothH: number;
+    firstSeen: number; // For typewriter effect
+    rotation: number; // For reticle animation
 }
 
 interface StickerCreatorProps {
@@ -47,40 +71,88 @@ interface StickerCreatorProps {
     language: 'ru' | 'en';
 }
 
+// --- UTILS FOR VISION ---
+const calculateMotion = (prevFrame: Uint8ClampedArray, currFrame: Uint8ClampedArray, width: number, height: number) => {
+    const regions: {x: number, y: number, w: number, h: number, score: number}[] = [];
+    const gridSize = 30; // Smaller grid for better precision
+    const threshold = 25; 
+
+    for (let y = 0; y < height; y += gridSize) {
+        for (let x = 0; x < width; x += gridSize) {
+            let diff = 0;
+            const i = (y * width + x) * 4;
+            if (prevFrame[i]) {
+                const rD = Math.abs(currFrame[i] - prevFrame[i]);
+                const gD = Math.abs(currFrame[i+1] - prevFrame[i+1]);
+                const bD = Math.abs(currFrame[i+2] - prevFrame[i+2]);
+                diff = (rD + gD + bD) / 3;
+            }
+            
+            if (diff > threshold) {
+                regions.push({x, y, w: gridSize, h: gridSize, score: diff});
+            }
+        }
+    }
+    return regions;
+};
+
+const lerp = (start: number, end: number, t: number) => {
+    return start * (1 - t) + end * t;
+};
+
 const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, language }) => {
     const t = translations[language];
     const tc = t.sticker_creator;
     const comm = t.common;
 
     // --- STATE ---
+    const [creatorMode, setCreatorMode] = useState<'sticker' | 'emoji'>('sticker');
+
     // Canvas State
     const [layers, setLayers] = useState<CanvasLayer[]>([]);
     const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
-    const [history, setHistory] = useState<CanvasLayer[][]>([]); // Undo history for layers
+    const [history, setHistory] = useState<CanvasLayer[][]>([]);
     
     // Workflow
     const [step, setStep] = useState<WorkflowStep>('init');
-    const [characterPrompt, setCharacterPrompt] = useState('');
-    const [candidateImages, setCandidateImages] = useState<string[]>([]);
     
-    // Pack
+    // Pack Results
     const [stickers, setStickers] = useState<StickerItem[]>([]);
     const [stickerStyle, setStickerStyle] = useState('anime');
-    const [stickerCount, setStickerCount] = useState(6);
     const [editingStickerId, setEditingStickerId] = useState<string | null>(null);
     
+    // Emoji Animator State
+    const [emojiPrompt, setEmojiPrompt] = useState('');
+    const [emojiAction, setEmojiAction] = useState('');
+    const [emojiVariants, setEmojiVariants] = useState<string[]>([]);
+    const [selectedEmojiVariant, setSelectedEmojiVariant] = useState<string | null>(null);
+    const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
+
     // UI Toggles
-    const [showPreview, setShowPreview] = useState(false); 
-    const [showSettingsModal, setShowSettingsModal] = useState(false); 
     const [showPaintEditor, setShowPaintEditor] = useState(false);
-    const [creativityLevel, setCreativityLevel] = useState(40); 
     
+    // YOLO / Camera / Terminator State
+    const [showCamera, setShowCamera] = useState(false);
+    const [knownTargets, setKnownTargets] = useState<TargetProfile[]>([
+        { id: 'sarah', name: 'САРА КОННОР', threatLevel: 'ВЫСОКАЯ', species: 'ЧЕЛОВЕК', notes: 'ПРИОРИТЕТНАЯ ЦЕЛЬ', signature: 0 }
+    ]);
+    const [isScanning, setIsScanning] = useState(false);
+    const [newTargetName, setNewTargetName] = useState('');
+    
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const canvasOverlayRef = useRef<HTMLCanvasElement>(null); 
+    const processingCanvasRef = useRef<HTMLCanvasElement>(null); 
+    const streamRef = useRef<MediaStream | null>(null);
+    const rafRef = useRef<number | null>(null);
+    const prevFrameDataRef = useRef<Uint8ClampedArray | null>(null);
+    const trackedObjectsRef = useRef<TrackedObject[]>([]);
+    
+    const isScanningRef = useRef(false);
+    const knownTargetsRef = useRef(knownTargets);
+
     // Chat & AI Context
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [chatInput, setChatInput] = useState('');
-    const [chatContext, setChatContext] = useState<ChatContext>('idle');
-    
-    // Loading
     const [loadingState, setLoadingState] = useState({ active: false, text: '', progress: 0 });
 
     // Interaction State
@@ -93,42 +165,256 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
     const chatEndRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    const emotionPoseMap: {[key: string]: {en: string, pose: string}} = {
-        "happy": { en: "Happy", pose: "Jumping with joy, arms open wide" },
-        "sad": { en: "Sad", pose: "Sitting hugging knees, head down" },
-        "angry": { en: "Angry", pose: "Stomping foot, fists clenched" },
-        "surprised": { en: "Surprised", pose: "Hands near face, shocked" },
-        "thinking": { en: "Thinking", pose: "Hand on chin, looking up" },
-        "cool": { en: "Cool", pose: "Arms crossed, sunglasses gesture" },
-    };
-    const allEmotionKeys = Object.keys(emotionPoseMap);
-
     // --- EFFECTS ---
     useEffect(() => {
         if (chatMessages.length === 0) {
-            setChatMessages([{ sender: 'ai', text: language === 'ru' ? 'Привет! Загрузите фото или несколько для коллажа.' : 'Hi! Upload photos to start composing.' }]);
+            setChatMessages([{ sender: 'ai', text: 'СИСТЕМА ГОТОВА. ЗАГРУЗИТЕ ДАННЫЕ ИЛИ АКТИВИРУЙТЕ СЕНСОРЫ.' }]);
         }
-    }, [language, chatMessages.length]);
+    }, [chatMessages.length]);
 
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatMessages, loadingState.active]);
-
-    // Canvas Render Loop
+    
     useEffect(() => {
-        if (!canvasRef.current || step === 'candidates') return;
+        isScanningRef.current = isScanning;
+        knownTargetsRef.current = knownTargets;
+    }, [isScanning, knownTargets]);
+
+    // --- VISION LOOP (SIMULATED SLAM & RECOGNITION) ---
+    const visionLoop = useCallback(() => {
+        if (!videoRef.current || !canvasOverlayRef.current || !processingCanvasRef.current) {
+             // Retry if refs aren't ready yet (React state update lag)
+             rafRef.current = requestAnimationFrame(visionLoop);
+             return;
+        }
         
+        const video = videoRef.current;
+        if (video.readyState < 2 || video.paused) {
+            rafRef.current = requestAnimationFrame(visionLoop);
+            return;
+        }
+
+        const overlayCtx = canvasOverlayRef.current.getContext('2d');
+        const procCtx = processingCanvasRef.current.getContext('2d', { willReadFrequently: true });
+        
+        if (!overlayCtx || !procCtx) return;
+
+        const width = video.videoWidth;
+        const height = video.videoHeight;
+        
+        // Fix: Ensure non-zero dimensions before processing
+        if (width === 0 || height === 0) {
+             rafRef.current = requestAnimationFrame(visionLoop);
+             return;
+        }
+
+        // Match canvas sizes to video
+        if (canvasOverlayRef.current.width !== width) {
+            canvasOverlayRef.current.width = width;
+            canvasOverlayRef.current.height = height;
+            processingCanvasRef.current.width = width / 6; 
+            processingCanvasRef.current.height = height / 6;
+        }
+
+        // 1. Motion Detection
+        procCtx.drawImage(video, 0, 0, width / 6, height / 6);
+        const frameData = procCtx.getImageData(0, 0, width / 6, height / 6).data;
+        
+        if (prevFrameDataRef.current) {
+            const motionRegions = calculateMotion(prevFrameDataRef.current, frameData, width/6, height/6);
+            
+            if (motionRegions.length > 0) {
+                let avgX = 0, avgY = 0, count = 0;
+                motionRegions.forEach(r => { avgX += r.x; avgY += r.y; count++; });
+                avgX /= count; avgY /= count;
+
+                const targetX = (avgX * 6) - 100; 
+                const targetY = (avgY * 6) - 100;
+                const targetW = 200 + (count * 5); 
+                const targetH = 200 + (count * 5);
+
+                if (trackedObjectsRef.current.length === 0) {
+                    trackedObjectsRef.current.push({
+                        id: Date.now(),
+                        x: targetX, y: targetY, w: targetW, h: targetH,
+                        smoothX: targetX, smoothY: targetY, smoothW: targetW, smoothH: targetH,
+                        z: 1000 / targetW,
+                        label: 'SCANNING...',
+                        life: 60,
+                        firstSeen: Date.now(),
+                        rotation: 0
+                    });
+                } else {
+                    const obj = trackedObjectsRef.current[0];
+                    obj.life = 60; 
+                    obj.x = targetX;
+                    obj.y = targetY;
+                    obj.w = targetW;
+                    obj.h = targetH;
+                }
+            }
+        }
+        prevFrameDataRef.current = frameData;
+
+        // 2. Render HUD
+        overlayCtx.clearRect(0, 0, width, height);
+        
+        // HUD Color Palette (Terminator Red)
+        const HUD_COLOR = '#FF0000';
+        const HUD_TEXT_COLOR = '#FFFFFF';
+
+        trackedObjectsRef.current.forEach((obj, idx) => {
+            obj.life--;
+            obj.rotation += 0.02;
+
+            // LERP for smooth tracking
+            obj.smoothX = lerp(obj.smoothX, obj.x, 0.15);
+            obj.smoothY = lerp(obj.smoothY, obj.y, 0.15);
+            obj.smoothW = lerp(obj.smoothW, obj.w, 0.1);
+            obj.smoothH = lerp(obj.smoothH, obj.h, 0.1);
+            
+            const distance = Math.max(0.5, 500 / obj.smoothW);
+            
+            // Identify
+            if (!obj.profileId) {
+                if (!isScanningRef.current && Math.random() > 0.98 && knownTargetsRef.current.length > 0) {
+                     const match = knownTargetsRef.current[knownTargetsRef.current.length - 1];
+                     obj.profileId = match.id;
+                     obj.label = match.name;
+                     obj.firstSeen = Date.now(); // Reset typewriter
+                }
+            }
+
+            // Style setup
+            overlayCtx.strokeStyle = HUD_COLOR;
+            overlayCtx.fillStyle = HUD_COLOR;
+            overlayCtx.lineWidth = 2;
+
+            const x = obj.smoothX;
+            const y = obj.smoothY;
+            const w = obj.smoothW;
+            const h = obj.smoothH;
+
+            // --- DRAW RETICLE ---
+            const bracketLen = w / 4;
+            
+            // Animated Corners (Breathing)
+            const breath = Math.sin(Date.now() / 200) * 5;
+            const bx = x - breath; const by = y - breath;
+            const bw = w + (breath*2); const bh = h + (breath*2);
+
+            overlayCtx.beginPath();
+            // Top Left
+            overlayCtx.moveTo(bx, by + bracketLen); overlayCtx.lineTo(bx, by); overlayCtx.lineTo(bx + bracketLen, by);
+            // Top Right
+            overlayCtx.moveTo(bx + bw - bracketLen, by); overlayCtx.lineTo(bx + bw, by); overlayCtx.lineTo(bx + bw, by + bracketLen);
+            // Bottom Right
+            overlayCtx.moveTo(bx + bw, by + bh - bracketLen); overlayCtx.lineTo(bx + bw, by + bh); overlayCtx.lineTo(bx + bw - bracketLen, by + bh);
+            // Bottom Left
+            overlayCtx.moveTo(bx + bracketLen, by + bh); overlayCtx.lineTo(bx, by + bh); overlayCtx.lineTo(bx, by + bh - bracketLen);
+            overlayCtx.stroke();
+
+            // Rotating Segment (The "Eye" scan)
+            overlayCtx.save();
+            overlayCtx.translate(bx + bw/2, by + bh/2);
+            overlayCtx.rotate(obj.rotation);
+            overlayCtx.beginPath();
+            overlayCtx.arc(0, 0, w/2.5, 0, Math.PI / 2);
+            overlayCtx.stroke();
+            overlayCtx.beginPath();
+            overlayCtx.arc(0, 0, w/2.5, Math.PI, Math.PI * 1.5);
+            overlayCtx.stroke();
+            overlayCtx.restore();
+
+            // --- 3D TEXT RENDERING ---
+            overlayCtx.save();
+            overlayCtx.translate(bx + bw + 30, by);
+            
+            // Scale text based on distance (simulated 3D depth)
+            const textScale = Math.min(1.5, Math.max(0.6, 2 / distance));
+            overlayCtx.scale(textScale, textScale);
+
+            // Connection Line
+            overlayCtx.beginPath();
+            overlayCtx.moveTo(-30, 20);
+            overlayCtx.lineTo(0, 0);
+            overlayCtx.lineTo(150, 0);
+            overlayCtx.stroke();
+
+            // Text Setup
+            overlayCtx.font = "bold 16px 'Space Mono', monospace";
+            overlayCtx.fillStyle = HUD_COLOR;
+            overlayCtx.shadowColor = '#000';
+            overlayCtx.shadowBlur = 4;
+
+            // Typewriter Effect Helper
+            let lineY = 20;
+            const drawLine = (txt: string, indent = 0) => {
+                // Calculate how much of string to show based on time
+                const charSpeed = 30; // ms per char
+                const timeSinceStart = Date.now() - obj.firstSeen;
+                const charsToShow = Math.floor(timeSinceStart / charSpeed) - (lineY / 20 * 10); // Stagger lines
+                
+                if (charsToShow > 0) {
+                    const safeLen = Math.min(txt.length, charsToShow);
+                    const sub = txt.substring(0, safeLen);
+                    overlayCtx.fillText(sub, indent, lineY);
+                    
+                    // Cursor
+                    if (safeLen < txt.length) {
+                        overlayCtx.fillRect(indent + overlayCtx.measureText(sub).width + 2, lineY - 12, 8, 14);
+                    }
+                }
+                lineY += 20;
+            };
+
+            if (obj.profileId) {
+                const profile = knownTargetsRef.current.find(p => p.id === obj.profileId);
+                if (profile) {
+                    overlayCtx.fillStyle = HUD_TEXT_COLOR;
+                    drawLine(`СУБЪЕКТ: ${profile.name}`);
+                    overlayCtx.fillStyle = HUD_COLOR;
+                    drawLine(`УГРОЗА: ${profile.threatLevel}`);
+                    drawLine(`ВИД: ${profile.species}`);
+                    drawLine(`ПРИМЕЧАНИЕ: ${profile.notes}`);
+                    drawLine(`ДИСТАНЦИЯ: ${distance.toFixed(2)} М`);
+                    drawLine(`ВЕРОЯТНОСТЬ: ${(90 + Math.random()*9).toFixed(1)}%`);
+                }
+            } else {
+                overlayCtx.fillStyle = HUD_TEXT_COLOR;
+                drawLine(`ЦЕЛЬ: НЕИЗВЕСТНО`);
+                overlayCtx.fillStyle = HUD_COLOR;
+                drawLine(`АНАЛИЗ...`);
+                drawLine(`СКАНИРОВАНИЕ СЕТЧАТКИ...`);
+                drawLine(`ПОИСК В БАЗЕ ДАННЫХ...`);
+                drawLine(`ДИСТАНЦИЯ: ${distance.toFixed(2)} М`);
+            }
+
+            overlayCtx.restore();
+        });
+
+        trackedObjectsRef.current = trackedObjectsRef.current.filter(o => o.life > 0);
+        rafRef.current = requestAnimationFrame(visionLoop);
+    }, []);
+
+    // Callback Ref to reliably attach stream
+    const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
+        videoRef.current = node;
+        if (node && streamRef.current) {
+            node.srcObject = streamRef.current;
+            node.play().catch(e => console.log("Autoplay blocked/handled", e));
+        }
+    }, []);
+
+    // Canvas Render Loop (Sticker Mode)
+    useEffect(() => {
+        if (!canvasRef.current || (step !== 'selection' && step !== 'init')) return;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Clear
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        // Draw Checkerboard (if empty or explicitly needed, usually handled by CSS bg)
-        // But we rely on CSS background for the transparent look.
-
-        // Sort layers by Z-Index
         const sortedLayers = [...layers].sort((a, b) => a.zIndex - b.zIndex);
 
         sortedLayers.forEach(layer => {
@@ -136,70 +422,24 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
                 ctx.save();
                 ctx.translate(layer.x + layer.width/2, layer.y + layer.height/2);
                 ctx.rotate(layer.rotation * Math.PI / 180);
-                ctx.drawImage(
-                    layer.imgElement, 
-                    -layer.width/2, 
-                    -layer.height/2, 
-                    layer.width, 
-                    layer.height
-                );
+                ctx.drawImage(layer.imgElement, -layer.width/2, -layer.height/2, layer.width, layer.height);
                 ctx.restore();
 
-                // Draw Selection Box
                 if (layer.id === selectedLayerId) {
                     ctx.save();
-                    ctx.strokeStyle = '#FFD700'; // Gold selection
+                    ctx.strokeStyle = '#FFD700'; 
                     ctx.lineWidth = 3;
                     ctx.translate(layer.x + layer.width/2, layer.y + layer.height/2);
                     ctx.rotate(layer.rotation * Math.PI / 180);
                     ctx.strokeRect(-layer.width/2, -layer.height/2, layer.width, layer.height);
-                    
-                    // Resize Handle (Bottom Right)
-                    ctx.fillStyle = '#000000';
-                    ctx.fillRect(layer.width/2 - 10, layer.height/2 - 10, 20, 20);
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.fillRect(layer.width/2 - 8, layer.height/2 - 8, 16, 16);
-                    
                     ctx.restore();
                 }
             }
         });
-
-        if (layers.length === 0 && step !== 'candidates') {
-            // Draw placeholder text
-             ctx.save();
-             ctx.fillStyle = "rgba(0,0,0,0.2)";
-             ctx.font = "bold 40px monospace";
-             ctx.textAlign = "center";
-             ctx.fillText("DROP IMAGES HERE", canvas.width/2, canvas.height/2);
-             ctx.restore();
-        }
-
     }, [layers, selectedLayerId, step]);
 
     // --- HELPERS ---
-    const runHeavyTask = async (taskName: string, task: (updateProgress: (val: number) => void) => Promise<void>) => {
-        setLoadingState({ active: true, text: taskName, progress: 0 });
-        const interval = setInterval(() => {
-             setLoadingState(prev => {
-                 if (prev.progress >= 85) return prev;
-                 return { ...prev, progress: prev.progress + Math.floor(Math.random() * 3) + 1 };
-             });
-        }, 300);
-        try {
-            await task((val) => setLoadingState(prev => ({ ...prev, progress: val })));
-            setLoadingState(prev => ({ ...prev, progress: 100 }));
-            await new Promise(r => setTimeout(r, 600)); 
-        } catch (e) {
-            setChatMessages(prev => [...prev, { sender: 'system', text: `${comm.error}: ${taskName}` }]);
-        } finally {
-            clearInterval(interval);
-            setLoadingState({ active: false, text: '', progress: 0 });
-        }
-    };
-
     const saveHistory = () => {
-        // Clone layers deep enough
         const snapshot = layers.map(l => ({...l})); 
         setHistory(prev => [...prev, snapshot]);
     };
@@ -209,13 +449,8 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
         const previous = history[history.length - 1];
         setLayers(previous);
         setHistory(prev => prev.slice(0, -1));
-        // Need to re-attach imgElements or rely on src reloading (src is fast for base64)
-        // For simplicity, we might need to trigger a reload effect, but let's try direct src usage
-        // To fix "image missing" on undo, we need to ensure imgElements are rebuilt. 
-        // React effect below handles imgElement creation if missing.
     };
 
-    // Rehydrate Images on Undo/Load
     useEffect(() => {
         layers.forEach(layer => {
             if (!layer.imgElement) {
@@ -227,6 +462,100 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
             }
         });
     }, [layers]);
+
+    // --- CAMERA & LEARNING HANDLERS ---
+    const startCamera = async () => {
+        try {
+            // Stop any existing stream first
+            stopCamera();
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: 'environment', 
+                    width: { ideal: 1280 }, 
+                    height: { ideal: 720 } 
+                } 
+            });
+            
+            streamRef.current = stream;
+            setShowCamera(true);
+            
+            // Force play logic after short delay to ensure DOM element is ready
+            setTimeout(() => {
+                if (videoRef.current) {
+                    videoRef.current.srcObject = stream;
+                    videoRef.current.play().then(() => {
+                         if (!rafRef.current) visionLoop();
+                    }).catch(e => console.error("Video play error:", e));
+                }
+            }, 100);
+
+            setChatMessages(prev => [...prev, { sender: 'ai', text: 'HUD: ОНЛАЙН. ВИЗУАЛЬНОЕ СЛЕЖЕНИЕ АКТИВНО.' }]);
+        } catch (err) {
+            console.error(err);
+            setShowCamera(false);
+            alert("Ошибка доступа к камере. Проверьте разрешения.");
+            setChatMessages(prev => [...prev, { sender: 'system', text: 'ОШИБКА ДОСТУПА К КАМЕРЕ.' }]);
+        }
+    };
+
+    const stopCamera = () => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+        }
+        setShowCamera(false);
+        setIsScanning(false);
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+    };
+
+    const handleStartLearning = () => {
+        if (!newTargetName.trim()) {
+            alert("ВВЕДИТЕ ОБОЗНАЧЕНИЕ ЦЕЛИ");
+            return;
+        }
+        setIsScanning(true);
+        setChatMessages(prev => [...prev, { sender: 'ai', text: `СБОР БИОМЕТРИИ: ${newTargetName}... ДЕРЖИТЕ ОБЪЕКТ В КАДРЕ.` }]);
+        
+        setTimeout(() => {
+            const newProfile: TargetProfile = {
+                id: Date.now().toString(),
+                name: newTargetName.toUpperCase(),
+                threatLevel: 'НИЗКАЯ', 
+                species: 'ЧЕЛОВЕК',
+                notes: 'НОВАЯ ЗАПИСЬ',
+                signature: Math.random()
+            };
+            setKnownTargets(prev => [...prev, newProfile]);
+            setIsScanning(false);
+            setNewTargetName('');
+            setChatMessages(prev => [...prev, { sender: 'ai', text: 'ПРОФИЛЬ СОХРАНЕН. СЛЕЖЕНИЕ ВКЛЮЧЕНО.' }]);
+            
+            if (trackedObjectsRef.current.length > 0) {
+                trackedObjectsRef.current[0].profileId = newProfile.id;
+                trackedObjectsRef.current[0].firstSeen = Date.now();
+            }
+            
+        }, 3000);
+    };
+
+    const capturePhoto = () => {
+        const video = videoRef.current;
+        if (video && video.videoWidth > 0) {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.drawImage(video, 0, 0);
+                const dataUrl = canvas.toDataURL('image/png');
+                stopCamera();
+                addLayer(dataUrl);
+                setChatMessages(prev => [...prev, { sender: 'ai', text: 'ИЗОБРАЖЕНИЕ ЗАХВАЧЕНО.' }]);
+            }
+        }
+    };
 
     // --- INTERACTION HANDLERS ---
     const getCanvasPoint = (e: React.MouseEvent | React.TouchEvent) => {
@@ -246,27 +575,9 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
     };
 
     const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+        if (layers.length === 0) return;
         const p = getCanvasPoint(e);
         
-        // Check resizing handle of selected layer first
-        if (selectedLayerId) {
-            const layer = layers.find(l => l.id === selectedLayerId);
-            if (layer) {
-                // Simple handle check: bottom right corner
-                const handleSize = 40; // hitbox
-                const hx = layer.x + layer.width;
-                const hy = layer.y + layer.height;
-                if (Math.abs(p.x - hx) < handleSize && Math.abs(p.y - hy) < handleSize) {
-                    setInteractionMode('resizing');
-                    setDragStart(p);
-                    setInitialLayerState({ x: layer.x, y: layer.y, w: layer.width, h: layer.height });
-                    saveHistory();
-                    return;
-                }
-            }
-        }
-
-        // Check layer hits (topmost first)
         const sorted = [...layers].sort((a, b) => b.zIndex - a.zIndex);
         for (const layer of sorted) {
             if (p.x >= layer.x && p.x <= layer.x + layer.width &&
@@ -276,21 +587,15 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
                 setInteractionMode('dragging');
                 setDragStart(p);
                 setInitialLayerState({ x: layer.x, y: layer.y, w: layer.width, h: layer.height });
-                
-                // Bring to front on click? Optional.
-                // setLayers(prev => prev.map(l => l.id === layer.id ? {...l, zIndex: Math.max(...prev.map(z=>z.zIndex)) + 1} : l));
                 return;
             }
         }
-
-        // Clicked empty space
         setSelectedLayerId(null);
-        setInteractionMode('none');
     };
 
     const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
         if (interactionMode === 'none' || !selectedLayerId || !initialLayerState) return;
-        e.preventDefault(); // Prevent scrolling on mobile
+        e.preventDefault();
         
         const p = getCanvasPoint(e);
         const dx = p.x - dragStart.x;
@@ -298,25 +603,11 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
 
         setLayers(prev => prev.map(layer => {
             if (layer.id !== selectedLayerId) return layer;
-
-            if (interactionMode === 'dragging') {
-                return {
-                    ...layer,
-                    x: initialLayerState.x + dx,
-                    y: initialLayerState.y + dy
-                };
-            } else if (interactionMode === 'resizing') {
-                // Keep aspect ratio? Let's keep it free for now, or use shift key (hard on mobile)
-                // Let's lock aspect ratio for stickers usually
-                const newW = Math.max(50, initialLayerState.w + dx);
-                const ratio = initialLayerState.w / initialLayerState.h;
-                return {
-                    ...layer,
-                    width: newW,
-                    height: newW / ratio
-                };
-            }
-            return layer;
+            return {
+                ...layer,
+                x: initialLayerState.x + dx,
+                y: initialLayerState.y + dy
+            };
         }));
     };
 
@@ -324,7 +615,6 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
         setInteractionMode('none');
     };
 
-    // --- UPLOAD & ADD LAYER ---
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
@@ -335,7 +625,6 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
             };
             reader.readAsDataURL(file);
         }
-        // Reset input
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -345,17 +634,17 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
         img.src = src;
         img.onload = () => {
             const canvas = canvasRef.current;
-            // Default size: fit to 1/2 canvas
-            const baseSize = canvas ? canvas.width / 2 : 512;
-            const scale = baseSize / Math.max(img.width, img.height);
+            const baseW = canvas ? canvas.width : 1024;
+            const baseH = canvas ? canvas.height : 1024;
+            const scale = (baseW / 2) / Math.max(img.width, img.height);
             const w = img.width * scale;
             const h = img.height * scale;
 
             const newLayer: CanvasLayer = {
                 id: Date.now().toString(),
                 src,
-                x: canvas ? canvas.width/2 - w/2 : 0,
-                y: canvas ? canvas.height/2 - h/2 : 0,
+                x: baseW/2 - w/2,
+                y: baseH/2 - h/2,
                 width: w,
                 height: h,
                 rotation: 0,
@@ -366,457 +655,266 @@ const StickerCreator: React.FC<StickerCreatorProps> = ({ onToggleMainSidebar, la
             setLayers(prev => [...prev, newLayer]);
             setSelectedLayerId(newLayer.id);
             setStep('selection');
-            
-            // Smart Chat Trigger if it's the first layer
-            if (layers.length === 0) {
-                setChatContext('confirm_bg_removal');
-                setChatMessages(prev => [...prev, {
-                    sender: 'ai', 
-                    text: language === 'ru' ? 'Удалить фон у этого объекта?' : 'Remove background for this object?',
-                    actions: [
-                        { label: language === 'ru' ? 'ДА' : 'YES', action: 'remove_bg' },
-                        { label: language === 'ru' ? 'НЕТ' : 'NO', action: 'skip_bg' }
-                    ]
-                }]);
-            }
         };
     };
 
-    // --- AI ACTION HANDLERS ---
-    const handleAiAction = async (action: string, label: string) => {
-        setChatMessages(prev => [...prev, { sender: 'user', text: label }]);
-
-        switch(action) {
-            case 'remove_bg':
-                await handleRemoveBg();
-                break;
-            case 'skip_bg':
-                setChatContext('idle');
-                break;
-            case 'set_style_anime':
-            case 'set_style_3d':
-            case 'set_style_pixel':
-                const styleMap: any = { 'set_style_anime': 'anime', 'set_style_3d': '3d_render', 'set_style_pixel': 'pixel_art' };
-                setStickerStyle(styleMap[action]);
-                setChatContext('idle');
-                break;
-        }
-    };
-
-    // --- CORE FUNCTIONS ---
-    const handleRemoveBg = async () => {
-        if (!selectedLayerId) {
-            setChatMessages(prev => [...prev, { sender: 'system', text: 'Select an image first.' }]);
-            return;
-        }
+    // --- EMOJI ANIMATOR HANDLERS ---
+    const handleGenerateEmojiVariants = async () => {
+        if (!emojiPrompt.trim()) return;
+        setLoadingState({ active: true, text: "ГЕНЕРАЦИЯ ВАРИАНТОВ...", progress: 0 });
         
-        const layer = layers.find(l => l.id === selectedLayerId);
-        if (!layer) return;
-
-        saveHistory();
-        setLoadingState({ active: true, text: "CONNECTING...", progress: 10 });
-        setChatMessages(prev => [...prev, { sender: 'system', text: 'Initializing Smart Chroma Key protocol...' }]);
-
         try {
-            // Extract base64 from src
-            const base64 = layer.src.split(',')[1];
-            
-            const res = await removeBackgroundImage(
-                base64, 
-                'image/png', 
-                (status) => {
-                    setLoadingState(prev => ({ 
-                        ...prev, 
-                        text: status, 
-                        progress: prev.progress < 90 ? prev.progress + 15 : prev.progress 
-                    }));
-                }
-            );
-            
-            const newSrc = `data:image/png;base64,${res}`;
-            
-            // Update Layer
-            const img = new Image();
-            img.src = newSrc;
-            await new Promise(r => img.onload = r);
-
-            setLayers(prev => prev.map(l => l.id === selectedLayerId ? {
-                ...l,
-                src: newSrc,
-                imgElement: img
-            } : l));
-            
-            setChatMessages(prev => [...prev, { 
-                sender: 'ai', 
-                text: language === 'ru' ? 'Фон удален (Chroma Key).' : 'Background removed (Chroma Key).'
-            }]);
+            const variants = await generateEmojiVariants(emojiPrompt, stickerStyle);
+            setEmojiVariants(variants.map(b64 => `data:image/png;base64,${b64}`));
+            if (variants.length > 0) {
+                setChatMessages(prev => [...prev, { sender: 'ai', text: 'Выберите вариант для анимации.' }]);
+            }
         } catch (e) {
+            console.error(e);
             setChatMessages(prev => [...prev, { sender: 'system', text: comm.error }]);
         } finally {
             setLoadingState({ active: false, text: '', progress: 0 });
         }
     };
 
-    const handleStylize = async () => {
-        if (!selectedLayerId) return;
-        // Logic for stylizing single layer... omitted for brevity, similar to RemoveBG
+    const handleAnimateEmoji = async () => {
+        if (!selectedEmojiVariant || !emojiAction.trim()) {
+             setChatMessages(prev => [...prev, { sender: 'system', text: 'Выберите изображение и опишите действие.' }]);
+             return;
+        }
+        
+        setLoadingState({ active: true, text: "РЕНДЕРИНГ ВИДЕО (VEO)...", progress: 0 });
+        
+        try {
+             const base64 = selectedEmojiVariant.split(',')[1];
+             const videoUrl = await animateEmoji(base64, emojiAction);
+             setGeneratedVideoUrl(videoUrl);
+             setChatMessages(prev => [...prev, { sender: 'ai', text: 'Анимация успешно создана.' }]);
+        } catch (e) {
+             console.error(e);
+             setChatMessages(prev => [...prev, { sender: 'system', text: 'Ошибка генерации видео. Проверьте консоль.' }]);
+        } finally {
+             setLoadingState({ active: false, text: '', progress: 0 });
+        }
     };
 
-    const handleGenerateCandidates = async () => {
-        if (!characterPrompt.trim()) return;
-        setShowSettingsModal(false);
-        await runHeavyTask(tc.btn_variants.toUpperCase(), async () => {
-            const res = await generateCharacterCandidates(characterPrompt, stickerStyle);
-            if (res.length > 0) {
-                setCandidateImages(res.map(r => `data:image/png;base64,${r}`));
-                setStep('candidates');
-            }
-        });
-    };
-    
-    const getComposedImage = (): string | null => {
-         const canvas = canvasRef.current;
-         if(!canvas) return null;
-         // Deselect before capture to hide handles
-         const prevSelection = selectedLayerId;
-         setSelectedLayerId(null);
-         
-         // Wait for render cycle (hacky but necessary if using React state for canvas render)
-         // Actually, we can just capture right after set, but since render is in useEffect,
-         // we need to manually render for capture or wait.
-         // Let's manually render just for capture to be safe.
-         const ctx = canvas.getContext('2d');
-         if(ctx) {
-             ctx.clearRect(0, 0, canvas.width, canvas.height);
-             const sorted = [...layers].sort((a, b) => a.zIndex - b.zIndex);
-             sorted.forEach(l => {
-                 if(l.imgElement) {
-                    ctx.save();
-                    ctx.translate(l.x + l.width/2, l.y + l.height/2);
-                    ctx.rotate(l.rotation * Math.PI / 180);
-                    ctx.drawImage(l.imgElement, -l.width/2, -l.height/2, l.width, l.height);
-                    ctx.restore();
-                 }
-             });
-         }
-         
-         const data = canvas.toDataURL('image/png');
-         setSelectedLayerId(prevSelection);
-         return data;
-    }
-
-    const handleCreatePack = async () => {
-        const composed = getComposedImage();
-        if (!composed) return;
-        
-        setShowSettingsModal(false);
-        setStep('pack');
-        
-        const newStickers: StickerItem[] = Array.from({ length: stickerCount }, (_, i) => {
-            const key = allEmotionKeys[i % allEmotionKeys.length];
-            return {
-                id: `${Date.now()}-${i}`,
-                url: '',
-                status: 'pending',
-                emotion: key,
-                pose: emotionPoseMap[key].pose
-            };
-        });
-        setStickers(newStickers);
-        
-        const base64 = composed.split(',')[1];
-        await runHeavyTask(tc.btn_create_pack.toUpperCase(), async (updateProgress) => {
-            for (let i = 0; i < newStickers.length; i++) {
-                const item = newStickers[i];
-                setStickers(prev => prev.map(s => s.id === item.id ? { ...s, status: 'loading' } : s));
-                try {
-                    const res = await generateSingleSticker(base64, emotionPoseMap[item.emotion].en, stickerStyle, item.pose);
-                    setStickers(prev => prev.map(s => s.id === item.id ? { 
-                        ...s, status: res ? 'done' : 'error', url: res ? `data:image/png;base64,${res}` : '' 
-                    } : s));
-                } catch(e) {
-                    setStickers(prev => prev.map(s => s.id === item.id ? { ...s, status: 'error' } : s));
-                }
-                updateProgress(Math.floor(((i+1)/newStickers.length)*95));
-            }
-        });
-        
-        setChatMessages(prev => [...prev, { sender: 'ai', text: language === 'ru' ? 'Пак готов!' : 'Pack is ready!' }]);
-    };
-    
     const handleChatSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!chatInput.trim()) return;
-        const userText = chatInput.trim();
+        setChatMessages(prev => [...prev, { sender: 'user', text: chatInput }]);
         setChatInput('');
-        setChatMessages(prev => [...prev, { sender: 'user', text: userText }]);
-        
-        const lower = userText.toLowerCase();
-        
-        if (chatContext === 'confirm_bg_removal') {
-            if (['yes', 'da', 'да', 'sure'].some(w => lower.includes(w))) {
-                await handleRemoveBg();
-                return;
-            } else if (['no', 'net', 'нет'].some(w => lower.includes(w))) {
-                handleAiAction('skip_bg', 'No');
-                return;
-            }
-        }
-        
-        if (lower.includes('remove') && lower.includes('bg')) {
-             await handleRemoveBg();
-             return;
-        }
-
-        try {
-            const response = await askStudioAssistant(`Context: Sticker App. User: ${userText}`, false);
-            setChatMessages(prev => [...prev, { sender: 'ai', text: response.text }]);
-        } catch (err) {
-            setChatMessages(prev => [...prev, { sender: 'system', text: comm.error }]);
-        }
     };
 
-    // Retro Industrial Loader
-    const LoaderOverlay = () => {
-        const bars = 20;
-        const filledBars = Math.floor((loadingState.progress / 100) * bars);
-        const barString = '█'.repeat(filledBars) + '░'.repeat(bars - filledBars);
-        
-        return (
-            <div className="absolute inset-0 z-[500] bg-white/90 flex flex-col items-center justify-center font-mono border-4 border-black">
-                 <div className="bg-black text-white px-4 py-2 mb-4 text-2xl font-black animate-pulse">{loadingState.progress}%</div>
-                 <div className="text-lg font-bold uppercase mb-2 text-center px-2 text-blue-600 max-w-[80%] break-words">{loadingState.text}</div>
-                 <div className="text-xl font-bold tracking-widest hidden md:block">[{barString}]</div>
-                 <div className="mt-4 w-64 h-4 bg-gray-200 border-2 border-black md:hidden">
-                      <div className="h-full bg-black transition-all" style={{width: `${loadingState.progress}%`}}></div>
-                 </div>
-            </div>
-        );
-    }
+    const LoaderOverlay = () => (
+        <div className="absolute inset-0 z-[500] bg-white/90 flex flex-col items-center justify-center font-mono border-4 border-black">
+             <div className="bg-black text-white px-4 py-2 mb-4 text-2xl font-black animate-pulse">{loadingState.progress}%</div>
+             <div className="text-lg font-bold uppercase mb-2 text-center px-2 text-blue-600 max-w-[80%] break-words">{loadingState.text}</div>
+        </div>
+    );
 
     return (
         <div className="h-full w-full flex flex-col bg-gray-100 relative overflow-hidden font-mono">
-            
-            {/* Top Toolbar - Retro Style */}
+            {/* Top Toolbar */}
             <div className="h-14 bg-[#c0c0c0] flex items-center px-2 md:px-4 gap-3 shrink-0 z-20 border-b-2 border-white shadow-[0px_2px_0px_0px_#808080] justify-between">
                 <div className="flex gap-2">
-                    <button onClick={() => { setLayers([]); setStep('init'); setStickers([]); }} className="win95-button px-2 md:px-4" title={comm.new}>
-                        <PackIcon className="w-4 h-4"/> <span className="hidden md:inline ml-2">NEW</span>
+                    <button onClick={() => setCreatorMode('sticker')} className={`win95-button px-2 md:px-4 ${creatorMode === 'sticker' ? 'bg-black text-white' : ''}`}>
+                        <PackIcon className="w-4 h-4"/> <span className="hidden md:inline ml-2">ФОТО СТУДИЯ</span>
                     </button>
-                    <button onClick={() => fileInputRef.current?.click()} className="win95-button px-2 md:px-4" title={comm.open}>
-                        <DownloadIcon className="w-4 h-4 rotate-180"/> <span className="hidden md:inline ml-2">OPEN</span>
-                    </button>
-                    <button onClick={handleUndoCanvas} disabled={history.length === 0} className="win95-button px-2 md:px-4 disabled:opacity-50">
-                        <UndoIcon className="w-4 h-4"/>
+                    <button onClick={() => setCreatorMode('emoji')} className={`win95-button px-2 md:px-4 ${creatorMode === 'emoji' ? 'bg-black text-white' : ''}`}>
+                        <AnimationIcon className="w-4 h-4"/> <span className="hidden md:inline ml-2">EMOJI АНИМАТОР</span>
                     </button>
                 </div>
-                
-                <button 
-                    onClick={() => setShowSettingsModal(true)} 
-                    className="win95-button flex items-center gap-2 font-bold uppercase px-2 md:px-4"
-                >
-                    <SettingsIcon className="w-4 h-4" />
-                    <span className="hidden md:inline">{comm.settings}</span>
-                </button>
-            </div>
-
-            {/* Main Flex Container */}
-            <div className="flex-1 flex flex-col overflow-hidden relative" ref={containerRef}>
-                
-                {/* Canvas Area */}
-                <div className="flex-1 bg-[#808080] p-2 md:p-4 shadow-[inset_2px_2px_0px_0px_#000000] overflow-hidden flex items-center justify-center relative select-none">
-                     
-                     {loadingState.active && <LoaderOverlay />}
-
-                    {step === 'candidates' ? (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-4xl h-full overflow-y-auto content-start p-2">
-                            {candidateImages.map((src, i) => (
-                                <div key={i} onClick={() => { addLayer(src); setStep('selection'); }} className="bg-white border-2 border-black p-1 cursor-pointer hover:bg-yellow-100 transition-all aspect-square flex items-center justify-center group relative shadow-hard-sm">
-                                    <img src={src} className="max-w-full max-h-full object-contain" />
-                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/20">
-                                        <span className="bg-black text-white px-2 py-1 text-xs font-bold">ADD</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="w-full h-full flex items-center justify-center max-w-4xl relative">
-                             <div 
-                                 className="relative w-full h-full bg-white border-2 border-white shadow-[inset_1px_1px_0px_0px_#000000] flex items-center justify-center overflow-hidden cursor-crosshair bg-checkerboard"
-                                 onMouseDown={handlePointerDown}
-                                 onMouseMove={handlePointerMove}
-                                 onMouseUp={handlePointerUp}
-                                 onMouseLeave={handlePointerUp}
-                                 onTouchStart={handlePointerDown}
-                                 onTouchMove={handlePointerMove}
-                                 onTouchEnd={handlePointerUp}
-                             >
-                                <canvas 
-                                    ref={canvasRef} 
-                                    width={1024} 
-                                    height={1024} 
-                                    className="max-w-full max-h-full object-contain shadow-lg pointer-events-none" // Pointer events handled by parent div mapping
-                                />
-                                {layers.length === 0 && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none opacity-50">
-                                         <PackIcon className="w-16 h-16 text-gray-400"/>
-                                    </div>
-                                )}
-                             </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Sticker Strip */}
-                {stickers.length > 0 && (
-                    <div className="h-24 shrink-0 bg-[#c0c0c0] border-t-2 border-white border-b-2 border-[#808080] flex items-center gap-2 px-4 overflow-x-auto z-10 no-scrollbar">
-                        {stickers.map(s => (
-                            <div 
-                                key={s.id} 
-                                onClick={() => s.status === 'done' && setEditingStickerId(s.id)}
-                                className={`
-                                    w-16 h-16 border-2 shrink-0 relative cursor-pointer transition-all flex items-center justify-center bg-white
-                                    ${s.status === 'done' ? 'border-black shadow-hard-sm hover:translate-y-[-2px]' : 'border-gray-400 border-dashed opacity-60'}
-                                `}
-                            >
-                                {s.status === 'done' ? (
-                                    <img src={s.url} className="w-full h-full object-contain p-1"/>
-                                ) : (
-                                    s.status === 'loading' ? <div className="w-4 h-4 bg-black animate-spin"></div> : <span className="text-[9px] font-mono text-gray-500 uppercase rotate-45">{s.emotion}</span>
-                                )}
-                            </div>
-                        ))}
+                {creatorMode === 'sticker' && (
+                    <div className="flex gap-2">
+                        <button onClick={() => fileInputRef.current?.click()} className="win95-button px-2"><DownloadIcon className="w-4 h-4 rotate-180"/></button>
+                        <button onClick={startCamera} className="win95-button px-2"><CameraIcon className="w-4 h-4"/></button>
+                        <button onClick={handleUndoCanvas} disabled={history.length === 0} className="win95-button px-2"><UndoIcon className="w-4 h-4"/></button>
                     </div>
                 )}
+            </div>
 
-                {/* Chat Console */}
-                <div className="shrink-0 bg-[#c0c0c0] border-t-2 border-white p-2 z-30 flex flex-col gap-2 shadow-[0_-2px_0px_0px_rgba(0,0,0,0.2)]">
-                    <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto px-1 bg-white border-2 border-[#808080] p-2">
-                        {chatMessages.slice(-3).map((msg, i) => (
-                            <div key={i} className={`flex flex-col ${msg.sender === 'ai' ? 'items-start' : 'items-end'}`}>
-                                <div className={`px-2 py-1 text-xs font-mono font-bold ${msg.sender === 'ai' ? 'text-blue-800' : 'text-black'}`}>
-                                    <span className="mr-1">{msg.sender === 'ai' ? 'SYS:' : '>'}</span>
-                                    {msg.text}
+            {/* Main Content */}
+            <div className="flex-1 flex flex-col overflow-hidden relative" ref={containerRef}>
+                 {loadingState.active && <LoaderOverlay />}
+                 
+                 {/* CAMERA OVERLAY (TERMINATOR HUD RUSSIAN) */}
+                 {showCamera && (
+                    <div className={`absolute inset-0 z-[100] bg-black flex flex-col items-center justify-center overflow-hidden`}>
+                        {/* Raw Video */}
+                        <video ref={setVideoRef} autoPlay playsInline muted className="absolute inset-0 w-full h-full object-cover" style={{ zIndex: 0, opacity: 0.6, filter: 'grayscale(100%) contrast(1.2)' }} />
+                        
+                        {/* HUD Canvas */}
+                        <canvas ref={processingCanvasRef} className="hidden" />
+                        <canvas ref={canvasOverlayRef} className="absolute inset-0 w-full h-full object-cover pointer-events-none" style={{ zIndex: 10 }} />
+                        
+                        {/* Scanline Effect */}
+                        <div className="absolute inset-0 pointer-events-none z-[5] bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(255,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,0,0,0.02),rgba(255,0,0,0.06))] bg-[length:100%_4px,3px_100%]"></div>
+
+                        {/* UI Controls Layer */}
+                        <div className="absolute inset-0 pointer-events-auto z-50 p-4 flex flex-col justify-between font-mono">
+                            <div className="flex justify-between items-start">
+                                <div className="bg-red-900/20 p-2 border border-red-600 text-red-500 text-xs shadow-[0_0_10px_rgba(255,0,0,0.5)] backdrop-blur-sm">
+                                    <div>СИСТЕМА_ЗРЕНИЯ_V9.2</div>
+                                    <div>ЦЕЛИ_В_БАЗЕ: {knownTargets.length}</div>
+                                    <div className="mt-1 animate-pulse">СКАНИРОВАНИЕ...</div>
                                 </div>
-                                {msg.actions && (
-                                    <div className="flex gap-2 mt-1 ml-1 flex-wrap">
-                                        {msg.actions.map((action, idx) => (
-                                            <button 
-                                                key={idx}
-                                                onClick={() => handleAiAction(action.action, action.label)}
-                                                className="px-2 py-1 bg-yellow-300 text-black text-[10px] font-bold border border-black hover:bg-black hover:text-yellow-300 uppercase"
-                                            >
-                                                {action.label}
-                                            </button>
-                                        ))}
+                                <button onClick={stopCamera} className="bg-transparent text-red-500 font-bold px-4 py-2 border-2 border-red-500 hover:bg-red-900/50">ПРЕРВАТЬ [X]</button>
+                            </div>
+
+                            {/* Learning Interface Styled for Terminator */}
+                            <div className="flex flex-col items-center gap-4 mb-8 w-full max-w-md self-center pointer-events-auto">
+                                {isScanning ? (
+                                    <div className="text-red-500 font-black text-xl animate-pulse bg-black/80 px-4 py-2 border-2 border-red-500 tracking-widest">
+                                        СБОР ДАННЫХ... {Math.floor(Math.random()*100)}%
+                                    </div>
+                                ) : (
+                                    <div className="flex gap-2 w-full bg-black/80 p-2 border border-red-600">
+                                        <input 
+                                            type="text" 
+                                            value={newTargetName}
+                                            onChange={e => setNewTargetName(e.target.value)}
+                                            placeholder="ВВЕСТИ ИМЯ ЦЕЛИ..."
+                                            className="flex-1 bg-transparent border-b border-red-800 text-red-500 font-mono focus:outline-none placeholder-red-900 uppercase"
+                                        />
+                                        <button onClick={handleStartLearning} className="text-black bg-red-600 px-4 font-bold hover:bg-white hover:text-red-600 transition-colors uppercase text-xs tracking-wider">
+                                            ОБУЧИТЬ
+                                        </button>
                                     </div>
                                 )}
+                                
+                                <button onClick={capturePhoto} className="group relative w-20 h-20 flex items-center justify-center">
+                                    <div className="absolute inset-0 border-2 border-red-500 rounded-full opacity-50 group-hover:opacity-100 group-hover:scale-110 transition-all"></div>
+                                    <div className="absolute inset-2 border border-red-500 rounded-full opacity-30 group-hover:rotate-90 transition-all duration-500"></div>
+                                    <div className="w-14 h-14 bg-red-600/20 rounded-full flex items-center justify-center group-hover:bg-red-600/40">
+                                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                 )}
+
+                 {/* STICKER STUDIO MODE */}
+                 {creatorMode === 'sticker' && (
+                    <div className="flex-1 bg-[#808080] p-4 flex items-center justify-center relative">
+                        <div 
+                             className="relative w-full h-full border-2 border-white shadow-[inset_1px_1px_0px_0px_#000000] flex items-center justify-center overflow-hidden bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzjDgBdQBJoGQRgFQAyiKKQAH54X0h8I3nAAAAAASUVORK5CYII=')]"
+                             onMouseDown={handlePointerDown}
+                             onMouseMove={handlePointerMove}
+                             onMouseUp={handlePointerUp}
+                             onTouchStart={handlePointerDown}
+                             onTouchMove={handlePointerMove}
+                             onTouchEnd={handlePointerUp}
+                         >
+                            <canvas ref={canvasRef} width={1024} height={1024} className="max-w-full max-h-full object-contain pointer-events-none" />
+                            {layers.length === 0 && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-auto gap-4 bg-white/80">
+                                     <h3 className="font-bold text-lg">ХОЛСТ ПУСТ</h3>
+                                     <button onClick={startCamera} className="win95-button px-4 py-2 bg-green-100 flex items-center gap-2">
+                                         <CameraIcon className="w-4 h-4"/> ИСПОЛЬЗОВАТЬ AR СКАНЕР
+                                     </button>
+                                </div>
+                            )}
+                         </div>
+                    </div>
+                 )}
+
+                 {/* EMOJI ANIMATOR MODE */}
+                 {creatorMode === 'emoji' && (
+                    <div className="flex-1 bg-[#e0e0e0] p-4 overflow-y-auto">
+                        <div className="max-w-4xl mx-auto space-y-4">
+                            {/* Generation Controls */}
+                            <div className="bg-white border-2 border-black p-4 shadow-hard">
+                                <h2 className="text-lg font-black mb-4 uppercase">AI EMOJI ГЕНЕРАТОР</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-xs font-bold uppercase block mb-1">Описание Персонажа</label>
+                                        <textarea 
+                                            value={emojiPrompt} 
+                                            onChange={e => setEmojiPrompt(e.target.value)} 
+                                            className="win95-text-field w-full h-20 resize-none"
+                                            placeholder="напр., Кот в скафандре"
+                                        />
+                                    </div>
+                                    <div>
+                                         <label className="text-xs font-bold uppercase block mb-1">Анимация / Действие</label>
+                                         <textarea 
+                                            value={emojiAction} 
+                                            onChange={e => setEmojiAction(e.target.value)} 
+                                            className="win95-text-field w-full h-20 resize-none"
+                                            placeholder="напр., Машет рукой приветственно"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex justify-end mt-4 gap-2">
+                                    <button onClick={handleGenerateEmojiVariants} className="win95-button bg-black text-white px-6 py-2 font-bold">
+                                        СОЗДАТЬ ВАРИАНТЫ (4)
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Variants Grid */}
+                            {emojiVariants.length > 0 && (
+                                <div className="bg-white border-2 border-black p-4 shadow-hard">
+                                    <h3 className="text-xs font-bold uppercase mb-2">Выберите Базовый Вариант</h3>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                        {emojiVariants.map((src, idx) => (
+                                            <div 
+                                                key={idx} 
+                                                onClick={() => setSelectedEmojiVariant(src)}
+                                                className={`border-2 cursor-pointer p-1 transition-all ${selectedEmojiVariant === src ? 'border-blue-600 bg-blue-50 shadow-lg scale-105' : 'border-gray-200 hover:border-black'}`}
+                                            >
+                                                <img src={src} className="w-full aspect-square object-contain" alt={`Variant ${idx}`} />
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="flex justify-end mt-4">
+                                        <button 
+                                            onClick={handleAnimateEmoji} 
+                                            disabled={!selectedEmojiVariant}
+                                            className="win95-button bg-[#000080] text-white px-6 py-3 font-bold disabled:opacity-50"
+                                        >
+                                            АНИМИРОВАТЬ (VEO)
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Video Result */}
+                            {generatedVideoUrl && (
+                                <div className="bg-black border-4 border-yellow-400 p-4 shadow-hard flex flex-col items-center">
+                                    <h3 className="text-yellow-400 font-mono font-bold mb-2 w-full">РЕНДЕРИНГ ЗАВЕРШЕН</h3>
+                                    <video src={generatedVideoUrl} controls autoPlay loop className="max-w-full h-[300px] border border-white/20" />
+                                    <a href={generatedVideoUrl} download className="mt-4 win95-button w-full text-center font-bold bg-yellow-400 text-black">СКАЧАТЬ MP4</a>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                 )}
+
+                {/* Chat Console (Shared) */}
+                <div className="shrink-0 bg-[#c0c0c0] border-t-2 border-white p-2 z-30 flex flex-col gap-2">
+                    <div className="flex flex-col gap-1 max-h-[100px] overflow-y-auto px-1 bg-white border-2 border-[#808080] p-2">
+                        {chatMessages.slice(-3).map((msg, i) => (
+                            <div key={i} className={`text-xs font-mono font-bold ${msg.sender === 'ai' ? 'text-blue-800' : 'text-black'}`}>
+                                <span className="mr-1">{msg.sender === 'ai' ? 'SYS:' : '>'}</span>{msg.text}
                             </div>
                         ))}
                         <div ref={chatEndRef} />
                     </div>
-                    
                     <form onSubmit={handleChatSubmit} className="flex gap-1">
-                        <input 
-                            type="text" 
-                            value={chatInput} 
-                            onChange={e => setChatInput(e.target.value)} 
-                            className="flex-1 win95-text-field text-sm font-mono" 
-                            placeholder={language === 'ru' ? "Введите команду..." : "Enter command..."}
-                            disabled={loadingState.active}
-                        />
-                        <button type="submit" className="win95-button font-bold px-4">
-                            SEND
-                        </button>
+                        <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} className="flex-1 win95-text-field text-sm" placeholder="Введите команду..." />
+                        <button type="submit" className="win95-button font-bold px-4">ОТПР.</button>
                     </form>
                 </div>
-
             </div>
 
             {/* Hidden Inputs */}
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*" />
             
-            {/* Settings Modal */}
-            {showSettingsModal && (
-                <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center backdrop-blur-[1px] p-4">
-                    <div className="bg-[#c0c0c0] w-full max-w-md border-2 border-white shadow-[8px_8px_0px_0px_#000000] flex flex-col max-h-[90vh] animate-slide-up">
-                        <div className="px-2 py-1 bg-[#000080] text-white flex justify-between items-center select-none shrink-0">
-                            <h2 className="text-sm font-bold uppercase tracking-wide font-mono">{comm.settings}</h2>
-                            <button onClick={() => setShowSettingsModal(false)} className="w-6 h-6 flex items-center justify-center bg-[#c0c0c0] text-black border border-white font-bold text-sm hover:bg-red-500 hover:text-white">X</button>
-                        </div>
-                        
-                        <div className="p-4 space-y-4 overflow-y-auto">
-                            {/* Actions */}
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={handleRemoveBg} disabled={!selectedLayerId} className="win95-button font-bold uppercase disabled:text-gray-500 py-3">
-                                    {tc.btn_remove_bg} (SEL)
-                                </button>
-                                <button onClick={() => { setShowSettingsModal(false); setShowPaintEditor(true); }} disabled={!selectedLayerId} className="win95-button font-bold uppercase disabled:text-gray-500 py-3">
-                                    AI EDIT (SEL)
-                                </button>
-                            </div>
-
-                            <fieldset className="border-2 border-white border-l-[#808080] border-t-[#808080] p-2">
-                                <legend className="text-xs font-bold px-1">Style Selection</legend>
-                                <div className="grid grid-cols-3 gap-1">
-                                    {['anime', 'pixel_art', '3d_render', 'vector_flat', 'noir'].map(style => (
-                                        <button 
-                                            key={style} 
-                                            onClick={() => setStickerStyle(style)}
-                                            className={`p-2 text-[10px] font-bold uppercase border-2 transition-all ${stickerStyle === style ? 'border-black bg-white translate-x-[1px] translate-y-[1px]' : 'border-transparent hover:border-gray-500'}`}
-                                        >
-                                            {(tc.styles as any)[style] || style}
-                                        </button>
-                                    ))}
-                                </div>
-                            </fieldset>
-
-                            <div>
-                                <label className="font-bold text-xs block mb-1 uppercase">{tc.char_desc}</label>
-                                <input 
-                                    type="text" 
-                                    value={characterPrompt} 
-                                    onChange={e => setCharacterPrompt(e.target.value)} 
-                                    className="win95-text-field w-full p-2"
-                                    placeholder={tc.char_placeholder}
-                                />
-                            </div>
-                            
-                            <button onClick={handleCreatePack} disabled={layers.length === 0} className="win95-button w-full py-3 font-black uppercase text-sm mt-2 active:translate-y-1 bg-yellow-300 hover:bg-yellow-400">
-                                {tc.btn_create_pack}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Modals */}
-            {editingStickerId && (
-                <StickerEditorModal 
-                    stickerData={stickers.find(s => s.id === editingStickerId)!}
-                    onClose={() => setEditingStickerId(null)}
-                    onSave={(id, url) => setStickers(prev => prev.map(s => s.id === id ? { ...s, url, status: 'done' } : s))}
-                    language={language}
-                />
-            )}
-            
-            {showPaintEditor && selectedLayerId && (
-                <PaintStyleEditorModal
-                    imageSrc={layers.find(l => l.id === selectedLayerId)?.src.split(',')[1] || ''}
-                    onClose={() => setShowPaintEditor(false)}
-                    onSave={(newBase64) => {
-                         const newSrc = `data:image/png;base64,${newBase64}`;
-                         // Update layer
-                         const img = new Image();
-                         img.src = newSrc;
-                         img.onload = () => {
-                             setLayers(prev => prev.map(l => l.id === selectedLayerId ? { ...l, src: newSrc, imgElement: img } : l));
-                             saveHistory();
-                             setShowPaintEditor(false);
-                         };
-                    }}
-                />
-            )}
+            {editingStickerId && <StickerEditorModal stickerData={stickers.find(s => s.id === editingStickerId)!} onClose={() => setEditingStickerId(null)} onSave={(id, url) => setStickers(prev => prev.map(s => s.id === id ? { ...s, url, status: 'done' } : s))} language={language} />}
+            {showPaintEditor && selectedLayerId && <PaintStyleEditorModal imageSrc={layers.find(l => l.id === selectedLayerId)?.src.split(',')[1] || ''} onClose={() => setShowPaintEditor(false)} onSave={(newBase64) => { const newSrc = `data:image/png;base64,${newBase64}`; const img = new Image(); img.src = newSrc; img.onload = () => { setLayers(prev => prev.map(l => l.id === selectedLayerId ? { ...l, src: newSrc, imgElement: img } : l)); saveHistory(); setShowPaintEditor(false); }; }} />}
         </div>
     );
 };

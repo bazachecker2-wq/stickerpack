@@ -1,5 +1,7 @@
 {
   "name": "Sticker Studio AI",
   "description": "An AI-powered sticker creation studio adapted as a Telegram Mini App. Users can upload photos, generate style variations, and create entire sticker packs seamlessly.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

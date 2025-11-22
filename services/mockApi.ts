@@ -380,8 +380,87 @@ export const stylizeImage = async (base64: string, style: string, prompt: string
     return result.image;
 };
 
+export const generateEmojiVariants = async (prompt: string, style: string): Promise<string[]> => {
+    try {
+        const apiKey = process.env.API_KEY;
+        if (!apiKey) throw new Error("No API Key");
+        const ai = new GoogleGenAI({ apiKey });
+        const model = 'gemini-2.5-flash-image';
+
+        // Create 4 parallel requests to simulate variants
+        const promises = Array.from({ length: 4 }).map(async () => {
+            const response = await ai.models.generateContent({
+                model,
+                contents: {
+                    parts: [{ text: `Create a high-quality emoji/sticker. Style: ${style}. Description: ${prompt}. Ensure it has a solid background and clear outlines suitable for stickers.` }]
+                }
+            });
+             if (response.candidates?.[0]?.content?.parts) {
+                for (const part of response.candidates[0].content.parts) {
+                    if (part.inlineData) {
+                        return part.inlineData.data;
+                    }
+                }
+             }
+             return null;
+        });
+
+        const results = await Promise.all(promises);
+        return results.filter(r => r !== null) as string[];
+    } catch (e) {
+        console.error("Failed to generate emoji variants", e);
+        return [];
+    }
+};
+
+export const animateEmoji = async (imageBase64: string, prompt: string): Promise<string> => {
+    try {
+         // Veo requires user to select key
+         if (window.aistudio && !await window.aistudio.hasSelectedApiKey()) {
+             await window.aistudio.openSelectKey();
+             // Wait a bit for key to propagate if necessary, or re-instantiate
+         }
+
+         // Important: Use a new instance to pick up the selected key
+         const apiKey = process.env.API_KEY;
+         if (!apiKey) throw new Error("API Key not selected");
+         
+         const ai = new GoogleGenAI({ apiKey });
+         const model = 'veo-3.1-fast-generate-preview';
+
+         let operation = await ai.models.generateVideos({
+            model,
+            prompt: `Animate this character: ${prompt}. Keep the movement looped and expressive suitable for a sticker/emoji.`,
+            image: {
+                imageBytes: imageBase64,
+                mimeType: 'image/png'
+            },
+            config: {
+                numberOfVideos: 1,
+                resolution: '720p', // Veo requirement
+                aspectRatio: '1:1' // Sticker format
+            }
+         });
+
+         // Poll for completion
+         while (!operation.done) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            operation = await ai.operations.getVideosOperation({operation: operation});
+         }
+
+         const videoUri = operation.response?.generatedVideos?.[0]?.video?.uri;
+         if (!videoUri) throw new Error("No video URI returned");
+
+         // Append key for download
+         return `${videoUri}&key=${apiKey}`;
+    } catch (e) {
+        console.error("Failed to animate emoji", e);
+        throw e;
+    }
+};
+
 export const generateCharacterCandidates = async (prompt: string, style: string): Promise<string[]> => simulateDelay([]);
-export const generateSingleSticker = async (base64: string, emotion: string, style: string, pose: string): Promise<string | null> => simulateDelay(base64);
+export const generateSingleSticker = async (base64: string, emotion: string, style: string, pose: string, customPrompt?: string): Promise<string | null> => simulateDelay(base64);
 export const runAgentCouncil = async (prompt: string): Promise<CouncilMessage[]> => simulateDelay([]);
 export const connectToSSH = async (): Promise<boolean> => true;
 export const sendSSHCommand = async (): Promise<string> => "";

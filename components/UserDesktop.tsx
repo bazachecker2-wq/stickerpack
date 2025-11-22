@@ -289,7 +289,7 @@ const UserDesktop: React.FC<UserDesktopProps> = ({ username, onLogout }) => {
                     </DraggableWindow>
                 ))}
             </div>
-            <div style={{ zIndex: 20, position: 'relative' }}>
+            <div style={{ zIndex: 99999, position: 'fixed', bottom: 0, left: 0, width: '100%' }}>
                 <Taskbar
                     openWindows={windows}
                     onRestore={restoreWindow}

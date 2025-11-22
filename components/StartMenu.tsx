@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface AppInfo {
@@ -25,7 +26,7 @@ const StartMenu: React.FC<StartMenuProps> = ({ apps, onAppClick, onLogout, onClo
     }
     
     return (
-        <div className="start-menu">
+        <div className="start-menu" style={{ zIndex: 2147483647 }}>
             <div className="start-menu-sidebar">
                 <span><b>Telegent</b>OS 98</span>
             </div>

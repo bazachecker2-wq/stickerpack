@@ -51,12 +51,12 @@ const Sidebar: React.FC<SidebarProps> = ({ sessionType, activeView, onNavigate, 
             {/* Overlay for Mobile */}
             <div 
                 onClick={() => setIsOpen(false)}
-                className={`fixed inset-0 bg-black/50 z-[60] md:hidden transition-opacity duration-300 ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+                className={`fixed inset-0 bg-black/50 z-[200] md:hidden transition-opacity duration-300 ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
             />
 
             <div 
                 className={`
-                    fixed md:relative top-0 left-0 h-full z-[70]
+                    fixed md:relative top-0 left-0 h-full z-[201]
                     bg-[#F0F0F0] border-r-2 border-black
                     transition-transform duration-300 ease-out font-mono
                     ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
