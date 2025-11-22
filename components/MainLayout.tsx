@@ -3,7 +3,6 @@ import React, { useState, Suspense } from 'react';
 import { Session, View, UserView } from '../types';
 import Sidebar from './Sidebar';
 import MenuIcon from './icons/MenuIcon';
-import CloseIcon from './icons/CloseIcon';
 import { Plugin } from '../types';
 import { translations } from '../utils/translations';
 
@@ -55,8 +54,8 @@ const MainLayout: React.FC<MainLayoutProps> = ({ session, onLogout, language, se
     'plugins': t.plugins,
     'creator-studio': t.creator_studio,
     'sticker-creator': t.sticker_creator,
-    'agent-council': 'СОВЕТ ИИ',
-    'ssh-terminal': 'SSH TERMINAL',
+    'agent-council': t.agent_council,
+    'ssh-terminal': t.ssh_terminal,
     'commands': t.commands,
     'chats': t.chats,
     'logs': t.logs,
@@ -73,7 +72,6 @@ const MainLayout: React.FC<MainLayoutProps> = ({ session, onLogout, language, se
   const handleOpenIDE = (plugin: Plugin | null) => {
     setCreatorStudioPlugin(plugin);
     setActiveView('creator-studio');
-    setSidebarOpen(false);
   };
 
   const handleCreatorStudioSave = () => {
@@ -81,18 +79,21 @@ const MainLayout: React.FC<MainLayoutProps> = ({ session, onLogout, language, se
     setActiveView('plugins');
   }
 
-  const ActiveComponent = componentMap[activeView];
   const componentProps: any = {
       isUserView: session.type === 'user',
       username: session.username,
       onOpenIDE: handleOpenIDE,
       onSaveSuccess: handleCreatorStudioSave,
       pluginToEdit: creatorStudioPlugin,
-      language: language 
+      language: language,
+      onToggleMainSidebar: () => setSidebarOpen(prev => !prev) 
   };
 
+  const ActiveComponent = componentMap[activeView];
+  const isFullScreenApp = activeView === 'sticker-creator' || activeView === 'ssh-terminal';
+  
   return (
-    <div className="flex h-screen bg-[#F8F8F8] text-black overflow-hidden flex-col md:flex-row">
+    <div className="flex h-full bg-gray-100 text-black overflow-hidden flex-col md:flex-row font-mono">
       <Sidebar
         sessionType={session.type}
         activeView={activeView}
@@ -102,40 +103,51 @@ const MainLayout: React.FC<MainLayoutProps> = ({ session, onLogout, language, se
         setIsOpen={setSidebarOpen}
         language={language}
       />
-      <main className="flex-1 flex flex-col overflow-hidden relative w-full">
-        <header className="flex items-center justify-between p-3 md:p-6 bg-white border-b-[3px] border-black z-10 shrink-0">
-             <div className="flex items-center">
+      
+      <main className="flex-1 flex flex-col overflow-hidden relative w-full h-full border-l-0 md:border-l-2 border-black">
+        {/* Brutalist Header */}
+        <header className="flex items-center justify-between px-4 py-3 md:px-6 md:py-4 bg-white border-b-2 border-black z-20 shrink-0 shadow-sm">
+             <div className="flex items-center gap-4">
                 <button 
                     onClick={() => setSidebarOpen(!isSidebarOpen)} 
-                    className="button md:hidden mr-4 p-0 min-w-[40px] h-10 flex items-center justify-center rounded-none"
+                    className="md:hidden p-2 bg-black text-white border-2 border-black hover:bg-gray-800 active:translate-y-1"
                 >
-                    {isSidebarOpen ? <CloseIcon className="h-6 w-6" /> : <MenuIcon className="h-6 w-6" />}
+                    <MenuIcon className="h-5 w-5" />
                 </button>
-                <h1 className="text-xl md:text-3xl font-black m-0 tracking-tighter truncate">
-                     {viewTitles[activeView]}
-                </h1>
-            </div>
-            <div className="flex gap-2 md:gap-5 items-center">
-                 <div className="flex border-2 border-black rounded-none overflow-hidden shrink-0">
-                    <button 
-                        onClick={() => setLanguage('ru')} 
-                        className={`px-2 py-1 md:px-3 md:py-1 font-bold font-heading cursor-pointer text-xs md:text-sm ${language === 'ru' ? 'bg-black text-white' : 'bg-white text-black'}`}
-                    >RU</button>
-                    <button 
-                        onClick={() => setLanguage('en')} 
-                        className={`px-2 py-1 md:px-3 md:py-1 font-bold font-heading cursor-pointer text-xs md:text-sm ${language === 'en' ? 'bg-black text-white' : 'bg-white text-black'}`}
-                    >EN</button>
-                 </div>
-                <div className="hidden md:flex items-center font-bold text-xs border-2 border-black px-3 py-1 uppercase bg-green-400 text-black shadow-[2px_2px_0px_black]">
-                    {t.status_online}
+
+                <div className="truncate max-w-[200px] md:max-w-none">
+                    <h1 className="text-lg md:text-2xl font-black tracking-tight uppercase leading-none flex items-center gap-2 truncate">
+                         <span className="text-yellow-500 text-xl md:text-2xl">■</span> {viewTitles[activeView]}
+                    </h1>
+                    {activeView === 'creator-studio' && creatorStudioPlugin && (
+                         <span className="text-[9px] md:text-[10px] bg-yellow-200 border border-black px-1 font-bold uppercase truncate block mt-1">EDITING: {creatorStudioPlugin.name}</span>
+                    )}
                 </div>
             </div>
+
+            <div className="flex gap-4 items-center">
+                 <div className="flex border-2 border-black bg-white shadow-hard-sm">
+                    <button 
+                        onClick={() => setLanguage('ru')} 
+                        className={`px-2 md:px-3 py-1 text-[10px] md:text-xs font-bold transition-all ${language === 'ru' ? 'bg-black text-white' : 'hover:bg-gray-100'}`}
+                    >RU</button>
+                    <div className="w-[2px] bg-black"></div>
+                    <button 
+                        onClick={() => setLanguage('en')} 
+                        className={`px-2 md:px-3 py-1 text-[10px] md:text-xs font-bold transition-all ${language === 'en' ? 'bg-black text-white' : 'hover:bg-gray-100'}`}
+                    >EN</button>
+                 </div>
+            </div>
         </header>
-        <div className="flex-1 overflow-y-auto p-2 md:p-6 w-full">
+
+        {/* Content Area */}
+        <div className={`flex-1 overflow-hidden w-full relative flex flex-col ${isFullScreenApp ? 'p-0' : 'p-3 md:p-8 bg-[#F0F0F0]'}`}>
           <Suspense fallback={
-            <div className="h-full w-full flex flex-col items-center justify-center text-black">
-                <div className="text-2xl md:text-4xl font-black animate-bounce">LOADING...</div>
-                <div className="mt-4 border-2 border-black w-48 h-4 p-0.5"><div className="h-full bg-black animate-pulse w-full"></div></div>
+            <div className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50">
+                <div className="flex flex-col items-center gap-4 border-2 border-black p-8 bg-white shadow-hard">
+                    <div className="w-8 h-8 bg-black animate-spin"></div>
+                    <span className="text-xs font-bold uppercase tracking-widest">LOADING MODULE...</span>
+                </div>
             </div>
           }>
             <ActiveComponent {...componentProps} />

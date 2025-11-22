@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 
 interface DraggableWindowProps {
@@ -24,9 +25,6 @@ const DraggableWindow: React.FC<DraggableWindowProps> = ({
     const [pos, setPos] = useState(initialPos);
     const [size, setSize] = useState(initialSize);
     
-    const [prevPos, setPrevPos] = useState(initialPos);
-    const [prevSize, setPrevSize] = useState(initialSize);
-
     const [isDragging, setIsDragging] = useState(false);
     const [isResizing, setIsResizing] = useState(false);
     const [resizeHandle, setResizeHandle] = useState('');
@@ -37,160 +35,175 @@ const DraggableWindow: React.FC<DraggableWindowProps> = ({
     const resizeStartMouse = useRef({ x: 0, y: 0 });
     const windowRef = useRef<HTMLDivElement>(null);
 
-    const handleMouseDownDrag = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (isMaximized || (e.target as HTMLElement).closest('.title-bar-button')) return;
+    useEffect(() => {
+        onFocus(id);
+        // Mobile Optimization: Check if window is off-screen initially
+        if (window.innerWidth < 768) {
+            setPos({ x: Math.max(0, Math.min(pos.x, window.innerWidth - 50)), y: Math.max(0, Math.min(pos.y, window.innerHeight - 100)) });
+            // Cap size on mobile
+            if (size.width > window.innerWidth) setSize({ ...size, width: window.innerWidth - 20 });
+        }
+    }, []); // eslint-disable-line
+
+    const handleStartDrag = (clientX: number, clientY: number) => {
+        if (isMaximized) return;
         onFocus(id);
         setIsDragging(true);
-        dragStartOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
+        dragStartOffset.current = { x: clientX - pos.x, y: clientY - pos.y };
     };
-    
-    const handleMouseDownResize = (e: React.MouseEvent<HTMLDivElement>, handle: string) => {
+
+    const handleStartResize = (clientX: number, clientY: number, handle: string) => {
         if (isMaximized) return;
-        e.stopPropagation();
         onFocus(id);
         setIsResizing(true);
         setResizeHandle(handle);
         resizeStartSize.current = size;
         resizeStartPos.current = pos;
-        resizeStartMouse.current = { x: e.clientX, y: e.clientY };
+        resizeStartMouse.current = { x: clientX, y: clientY };
     };
 
-    const handleMouseMove = useCallback((e: MouseEvent) => {
-        const desktop = document.querySelector('.desktop') as HTMLElement;
-        if (!desktop) return;
-        const desktopRect = desktop.getBoundingClientRect();
-
+    const handleMove = useCallback((clientX: number, clientY: number) => {
         if (isDragging) {
-            let newX = e.clientX - dragStartOffset.current.x;
-            let newY = e.clientY - dragStartOffset.current.y;
+            const containerW = window.innerWidth;
+            const containerH = window.innerHeight;
+            let newX = clientX - dragStartOffset.current.x;
+            let newY = clientY - dragStartOffset.current.y;
             
-            newX = Math.max(0, Math.min(newX, desktopRect.width - size.width));
-            newY = Math.max(0, Math.min(newY, desktopRect.height - 22));
+            // Constrain to screen bounds
+            newY = Math.max(0, Math.min(newY, containerH - 40));
+            newX = Math.max(-size.width + 50, Math.min(newX, containerW - 50));
             
             setPos({ x: newX, y: newY });
         } else if (isResizing) {
-            const dx = e.clientX - resizeStartMouse.current.x;
-            const dy = e.clientY - resizeStartMouse.current.y;
+            const dx = clientX - resizeStartMouse.current.x;
+            const dy = clientY - resizeStartMouse.current.y;
             
             let newWidth = resizeStartSize.current.width;
             let newHeight = resizeStartSize.current.height;
-            let newX = resizeStartPos.current.x;
-            let newY = resizeStartPos.current.y;
             
-            if (resizeHandle.includes('e')) newWidth = Math.max(200, resizeStartSize.current.width + dx);
-            if (resizeHandle.includes('s')) newHeight = Math.max(150, resizeStartSize.current.height + dy);
-            if (resizeHandle.includes('w')) {
-                const calculatedWidth = resizeStartSize.current.width - dx;
-                if (calculatedWidth >= 200) {
-                    newWidth = calculatedWidth;
-                    newX = resizeStartPos.current.x + dx;
-                }
-            }
-            if (resizeHandle.includes('n')) {
-                 const calculatedHeight = resizeStartSize.current.height - dy;
-                 if (calculatedHeight >= 150) {
-                    newHeight = calculatedHeight;
-                    newY = resizeStartPos.current.y + dy;
-                 }
-            }
+            if (resizeHandle.includes('e')) newWidth = Math.max(280, Math.min(window.innerWidth - pos.x, resizeStartSize.current.width + dx));
+            if (resizeHandle.includes('s')) newHeight = Math.max(200, Math.min(window.innerHeight - pos.y - 48, resizeStartSize.current.height + dy));
             
             setSize({ width: newWidth, height: newHeight });
-            setPos({ x: newX, y: newY });
         }
-    }, [isDragging, isResizing, resizeHandle, size.width]);
+    }, [isDragging, isResizing, resizeHandle, size.width, pos.x, pos.y]);
 
-    const handleMouseUp = useCallback(() => {
+    const handleEnd = useCallback(() => {
         setIsDragging(false);
         setIsResizing(false);
     }, []);
 
-    useEffect(() => {
-        if (isDragging || isResizing) {
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
-        }
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
-    
-    const handleMaximizeClick = () => {
-        if (!isMaximized) {
-            setPrevPos(pos);
-            setPrevSize(size);
-        }
-        onMaximize(id);
+    // Mouse Handlers
+    const onMouseDownDrag = (e: React.MouseEvent) => {
+        if((e.target as HTMLElement).closest('button')) return;
+        e.preventDefault();
+        handleStartDrag(e.clientX, e.clientY);
+    };
+    const onMouseDownResize = (e: React.MouseEvent, handle: string) => {
+        e.stopPropagation();
+        e.preventDefault();
+        handleStartResize(e.clientX, e.clientY, handle);
     };
 
+    // Touch Handlers
+    const onTouchStartDrag = (e: React.TouchEvent) => {
+        if((e.target as HTMLElement).closest('button')) return;
+        // e.preventDefault(); // Don't prevent default here to allow some interactions, or be careful
+        handleStartDrag(e.touches[0].clientX, e.touches[0].clientY);
+    };
+    const onTouchStartResize = (e: React.TouchEvent, handle: string) => {
+        e.stopPropagation();
+        handleStartResize(e.touches[0].clientX, e.touches[0].clientY, handle);
+    };
+
+
+    useEffect(() => {
+        const onMouseMove = (e: MouseEvent) => handleMove(e.clientX, e.clientY);
+        const onTouchMove = (e: TouchEvent) => handleMove(e.touches[0].clientX, e.touches[0].clientY);
+        
+        if (isDragging || isResizing) {
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', handleEnd);
+            window.addEventListener('touchmove', onTouchMove, { passive: false });
+            window.addEventListener('touchend', handleEnd);
+        }
+        return () => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', handleEnd);
+            window.removeEventListener('touchmove', onTouchMove);
+            window.removeEventListener('touchend', handleEnd);
+        };
+    }, [isDragging, isResizing, handleMove, handleEnd]);
+    
     useEffect(() => {
         if (isMaximized) {
-            const desktop = document.querySelector('.desktop');
-            if (desktop) {
-                setPos({ x: 0, y: 0 });
-                setSize({ width: desktop.clientWidth, height: desktop.clientHeight });
-            }
-        } else {
-             // Check if it was maximized before to restore
-            if (pos.x === 0 && pos.y === 0) {
-               setPos(prevPos);
-               setSize(prevSize);
-            }
+            setPos({ x: 0, y: 0 });
+            setSize({ width: window.innerWidth, height: window.innerHeight - 48 });
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isMaximized]);
 
     if (isMinimized) return null;
-    
-    // U+2_ denotes a unicode character, used here for window icons
-    const maximizeIcon = String.fromCharCode(0x1F5D6); 
-    const restoreIcon = String.fromCharCode(0x1F5D7);
 
     return (
         <div
             ref={windowRef}
-            className="draggable-window"
+            className={`
+                fixed flex flex-col bg-white overflow-hidden border-2 border-black
+                ${isActive ? 'shadow-hard z-50' : 'shadow-sm z-10'}
+            `}
             style={{
                 left: `${pos.x}px`,
                 top: `${pos.y}px`,
                 width: `${size.width}px`,
                 height: `${size.height}px`,
-                zIndex,
+                zIndex: zIndex,
+                touchAction: 'none'
             }}
             onMouseDown={() => onFocus(id)}
+            onTouchStart={() => onFocus(id)}
         >
+            {/* Classic Window Header */}
             <div
-                className={isActive ? "title-bar" : "title-bar title-bar-inactive"}
-                onMouseDown={handleMouseDownDrag}
-                onDoubleClick={handleMaximizeClick}
+                className={`
+                    flex items-center justify-between px-2 py-2 select-none border-b-2 border-black touch-none
+                    ${isActive ? 'bg-[#000080] text-white' : 'bg-[#808080] text-[#c0c0c0]'}
+                `}
+                onMouseDown={onMouseDownDrag}
+                onTouchStart={onTouchStartDrag}
             >
-                <div className="title-bar-text">
-                    <img src={iconUrl} alt="" style={{ width: '16px', height: '16px' }} />
-                    <span>{title}</span>
+                <div className="flex items-center gap-2 pointer-events-none">
+                     <img src={iconUrl} className="w-4 h-4" alt="" />
+                     <span className="text-xs font-bold tracking-wide uppercase truncate max-w-[150px]">{title}</span>
                 </div>
-                <div className="title-bar-controls">
-                    <button onClick={() => onMinimize(id)} className="title-bar-button">_</button>
-                    <button onClick={handleMaximizeClick} className="title-bar-button">
-                       {isMaximized ? restoreIcon : maximizeIcon}
-                    </button> 
-                    <button onClick={() => onClose(id)} className="title-bar-button">×</button>
+                
+                <div className="flex items-center gap-1">
+                     <button onClick={() => onMinimize(id)} className="w-6 h-6 flex items-center justify-center bg-[#c0c0c0] text-black border-t-2 border-l-2 border-white border-r-2 border-b-2 border-[#808080] active:border-t-[#808080] active:border-l-[#808080] active:border-r-white active:border-b-white leading-none pb-1 font-bold">_</button>
+                     <button onClick={() => onMaximize(id)} className="w-6 h-6 flex items-center justify-center bg-[#c0c0c0] text-black border-t-2 border-l-2 border-white border-r-2 border-b-2 border-[#808080] active:border-t-[#808080] active:border-l-[#808080] active:border-r-white active:border-b-white leading-none pb-1 font-bold">□</button>
+                     <button onClick={() => onClose(id)} className="w-6 h-6 flex items-center justify-center bg-[#c0c0c0] text-black border-t-2 border-l-2 border-white border-r-2 border-b-2 border-[#808080] active:border-t-[#808080] active:border-l-[#808080] active:border-r-white active:border-b-white leading-none pb-1 font-bold">×</button>
                 </div>
             </div>
-            <div className="window-content">
-                {children}
+
+            {/* Content */}
+            <div className="flex-1 overflow-hidden bg-[#c0c0c0] relative flex flex-col p-1">
+                 <div className="flex-1 bg-white border-2 border-[#808080] border-r-white border-b-white shadow-[inset_1px_1px_0px_0px_#000000] overflow-hidden flex flex-col relative">
+                    {!isActive && <div className="absolute inset-0 bg-white/10 z-10 pointer-events-none" />}
+                    {children}
+                 </div>
             </div>
-             {!isMaximized && (
-                <>
-                    <div className="resize-handle resize-handle-n" onMouseDown={e => handleMouseDownResize(e, 'n')}></div>
-                    <div className="resize-handle resize-handle-s" onMouseDown={e => handleMouseDownResize(e, 's')}></div>
-                    <div className="resize-handle resize-handle-e" onMouseDown={e => handleMouseDownResize(e, 'e')}></div>
-                    <div className="resize-handle resize-handle-w" onMouseDown={e => handleMouseDownResize(e, 'w')}></div>
-                    <div className="resize-handle resize-handle-nw" onMouseDown={e => handleMouseDownResize(e, 'nw')}></div>
-                    <div className="resize-handle resize-handle-ne" onMouseDown={e => handleMouseDownResize(e, 'ne')}></div>
-                    <div className="resize-handle resize-handle-sw" onMouseDown={e => handleMouseDownResize(e, 'sw')}></div>
-                    <div className="resize-handle resize-handle-se" onMouseDown={e => handleMouseDownResize(e, 'se')}></div>
-                </>
-             )}
+
+            {/* Resize Handles */}
+            {!isMaximized && (
+                <div 
+                    className="absolute bottom-0 right-0 w-6 h-6 cursor-se-resize z-50 bg-[#c0c0c0] touch-none flex items-end justify-end" 
+                    onMouseDown={e => onMouseDownResize(e, 'se')}
+                    onTouchStart={e => onTouchStartResize(e, 'se')}
+                >
+                     <div className="w-4 h-4 relative mr-0.5 mb-0.5">
+                        <div className="absolute bottom-0 right-0 w-0 h-0 border-l-[12px] border-l-transparent border-b-[12px] border-b-[#808080]"></div>
+                        <div className="absolute bottom-1 right-1 w-0 h-0 border-l-[8px] border-l-transparent border-b-[8px] border-b-[#ffffff]"></div>
+                     </div>
+                </div>
+            )}
         </div>
     );
 };

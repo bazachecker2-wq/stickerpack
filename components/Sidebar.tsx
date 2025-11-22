@@ -31,10 +31,10 @@ const Sidebar: React.FC<SidebarProps> = ({ sessionType, activeView, onNavigate, 
     const navItems = [
         { id: 'dashboard', label: t.dashboard, icon: DashboardIcon },
         { id: 'sticker-creator', label: 'ФОТО СТУДИЯ', icon: StickerIcon },
+        { id: 'ssh-terminal', label: 'SSH TERMINAL', icon: SSHIcon },
         { id: 'agent-council', label: 'СОВЕТ ИИ', icon: CouncilIcon },
         { id: 'creator-studio', label: 'IDE КОД', icon: CreatorStudioIcon },
         { id: 'plugins', label: t.plugins, icon: PluginIcon },
-        { id: 'ssh-terminal', label: 'SSH TERMINAL', icon: SSHIcon },
         { id: 'terminal', label: t.terminal, icon: TerminalIcon },
         { id: 'chats', label: t.chats, icon: ChatIcon },
         { id: 'commands', label: t.commands, icon: CommandsIcon },
@@ -49,88 +49,55 @@ const Sidebar: React.FC<SidebarProps> = ({ sessionType, activeView, onNavigate, 
     return (
         <>
             {/* Overlay for Mobile */}
-            {isOpen && (
-                <div 
-                    onClick={() => setIsOpen(false)}
-                    style={{
-                        position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 998,
-                    }}
-                />
-            )}
+            <div 
+                onClick={() => setIsOpen(false)}
+                className={`fixed inset-0 bg-black/50 z-[60] md:hidden transition-opacity duration-300 ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+            />
 
-            <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                width: '260px',
-                backgroundColor: '#FFFFFF',
-                borderRight: '3px solid #000000',
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                zIndex: 1000,
-                transform: isOpen ? 'translateX(0)' : 'translateX(-100%)',
-                transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: isOpen ? '10px 0 0px rgba(0,0,0,1)' : 'none'
-            }} className="md:translate-x-0 md:relative">
+            <div 
+                className={`
+                    fixed md:relative top-0 left-0 h-full z-[70]
+                    bg-[#F0F0F0] border-r-2 border-black
+                    transition-transform duration-300 ease-out font-mono
+                    ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+                    w-[280px] md:w-auto flex flex-col
+                    shadow-hard md:shadow-none
+                `}
+            >
                 
                 {/* Header */}
-                <div style={{ 
-                    padding: '24px', 
-                    borderBottom: '3px solid #000000', 
-                    backgroundColor: '#000', 
-                    color: '#fff',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px'
-                }}>
-                    <div className="flex justify-between items-center">
-                        <h2 style={{ fontSize: '28px', fontWeight: 900, letterSpacing: '-2px', margin: 0, lineHeight: 1 }}>TELE.OS</h2>
-                        <button onClick={() => setIsOpen(false)} className="md:hidden font-bold text-white border border-white px-2">X</button>
+                <div className="p-6 border-b-2 border-black bg-white flex justify-between items-start">
+                    <div>
+                        <h2 className="text-2xl font-black tracking-tighter leading-none italic">TELE.OS</h2>
+                        <div className="flex items-center gap-2 mt-1">
+                             <div className="w-2 h-2 bg-green-500 border border-black"></div>
+                             <p className="text-[10px] font-bold uppercase">v2.5.0 PRO</p>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono bg-white text-black px-1 font-bold">V 2.5.0</span>
-                        <span className="text-[10px] font-mono text-gray-400">PRO</span>
-                    </div>
+                    <button onClick={() => setIsOpen(false)} className="md:hidden font-bold text-xl w-8 h-8 border-2 border-black flex items-center justify-center bg-black text-white">✕</button>
                 </div>
 
                 {/* Navigation */}
-                <nav style={{ flex: 1, overflowY: 'auto', padding: '0' }} className="no-scrollbar">
-                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                <nav className="flex-1 overflow-y-auto p-4 no-scrollbar bg-[#F0F0F0] pb-safe">
+                    <ul className="space-y-2">
                         {navItems.map(item => {
                             const isActive = activeView === item.id;
+                            const Icon = item.icon;
                             return (
-                                <li key={item.id} style={{ borderBottom: '1px solid #eee' }}>
+                                <li key={item.id}>
                                     <button
                                         onClick={() => onNavigate(item.id as View | UserView)}
-                                        style={{
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            width: '100%',
-                                            padding: '16px 24px',
-                                            textDecoration: 'none',
-                                            fontWeight: isActive ? 800 : 500,
-                                            color: isActive ? '#FFFFFF' : '#000000',
-                                            backgroundColor: isActive ? '#000000' : '#FFFFFF',
-                                            textTransform: 'uppercase',
-                                            fontSize: '13px',
-                                            fontFamily: "'Space Grotesk', sans-serif",
-                                            transition: 'all 0.1s',
-                                            border: 'none',
-                                            cursor: 'pointer',
-                                            letterSpacing: '0.5px'
-                                        }}
-                                        className="hover:bg-gray-100 group"
+                                        className={`
+                                            w-full text-left px-4 py-3 text-xs font-bold uppercase tracking-wide border-2 transition-all duration-150 flex items-center gap-3 group
+                                            ${isActive 
+                                                ? 'bg-black text-white border-black shadow-hard-sm translate-x-[-2px] translate-y-[-2px]' 
+                                                : 'bg-white text-gray-500 border-black hover:bg-yellow-100 hover:text-black hover:shadow-hard-sm'
+                                            }
+                                        `}
                                     >
-                                        <div style={{ 
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center', 
-                                            width: '24px', height: '24px', marginRight: '16px',
-                                            opacity: isActive ? 1 : 0.5 
-                                        }}>
-                                            <item.icon />
-                                        </div>
-                                        {item.label}
-                                        {isActive && <span className="ml-auto font-mono text-xs">&lt;</span>}
+                                        <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-black'}`} />
+                                        <span className="flex-1">{item.label}</span>
+                                        {isActive && <span className="text-yellow-400">●</span>}
                                     </button>
                                 </li>
                             );
@@ -138,32 +105,17 @@ const Sidebar: React.FC<SidebarProps> = ({ sessionType, activeView, onNavigate, 
                     </ul>
                 </nav>
 
-                {/* Footer / Logout */}
-                <div style={{ padding: '20px', borderTop: '3px solid #000000', backgroundColor: '#fff' }}>
-                    <div className="mb-4 px-2">
-                         <p className="text-xs font-bold text-gray-400 uppercase">Session ID</p>
-                         <p className="text-xs font-mono truncate">{sessionType === 'admin' ? 'ROOT_ADMIN_SESSION' : 'USER_GUEST_SESSION'}</p>
+                {/* Footer */}
+                <div className="p-4 border-t-2 border-black bg-white pb-safe">
+                    <div className="bg-gray-100 border-2 border-black p-2 mb-4 text-center">
+                         <p className="text-[10px] text-gray-500 uppercase font-bold">SESSION ID</p>
+                         <p className="text-xs font-mono font-bold">{sessionType === 'admin' ? 'ROOT_8492' : 'USER_1123'}</p>
                     </div>
                     <button
                         onClick={onLogout}
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            width: '100%',
-                            padding: '14px',
-                            fontWeight: 900,
-                            color: '#000000',
-                            backgroundColor: '#FFFFFF',
-                            textTransform: 'uppercase',
-                            border: '2px solid #000000',
-                            boxShadow: '4px 4px 0px #000000',
-                            transition: 'all 0.1s',
-                            cursor: 'pointer'
-                        }}
-                        className="hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_#000] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                        className="w-full flex items-center justify-center py-2 text-xs font-bold uppercase text-black border-2 border-black hover:bg-red-500 hover:text-white transition-colors gap-2 shadow-hard-sm active:translate-x-[2px] active:translate-y-[2px] active:shadow-none"
                     >
-                        <LogoutIcon style={{ height: '16px', width: '16px', marginRight: '10px' }}/>
+                        <LogoutIcon className="w-4 h-4" />
                         {t.logout}
                     </button>
                 </div>

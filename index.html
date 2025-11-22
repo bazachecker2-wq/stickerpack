@@ -14,17 +14,40 @@
             fontFamily: {
               heading: ['Space Grotesk', 'sans-serif'],
               body: ['Inter', 'sans-serif'],
-              mono: ['monospace'],
+              mono: ['"Space Mono"', 'monospace'],
             },
             colors: {
               primary: '#000000',
+              secondary: '#FFFFFF',
+              accent: '#FFD700', // Highlighter Yellow
+              bg: '#F0F0F0',
               surface: '#FFFFFF',
-              bg: '#F8F8F8',
             },
             boxShadow: {
               'hard': '4px 4px 0px 0px #000000',
-              'hard-hover': '2px 2px 0px 0px #000000',
-              'hard-xl': '8px 8px 0px 0px #000000',
+              'hard-sm': '2px 2px 0px 0px #000000',
+              'hard-lg': '8px 8px 0px 0px #000000',
+              'hard-hover': '6px 6px 0px 0px #000000',
+            },
+            animation: {
+                'slide-up': 'slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+                'fade-in': 'fadeIn 0.3s ease-out forwards',
+                'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                'bounce-soft': 'bounceSoft 2s infinite',
+            },
+            keyframes: {
+                slideUp: {
+                    '0%': { transform: 'translateY(20px)', opacity: '0' },
+                    '100%': { transform: 'translateY(0)', opacity: '1' },
+                },
+                fadeIn: {
+                    '0%': { opacity: '0' },
+                    '100%': { opacity: '1' },
+                },
+                bounceSoft: {
+                    '0%, 100%': { transform: 'translateY(-5%)' },
+                    '50%': { transform: 'translateY(0)' },
+                }
             }
           }
         }
@@ -32,7 +55,7 @@
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;900&family=Space+Grotesk:wght@400;500;700&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <script type="importmap">
 {
@@ -45,23 +68,20 @@
     "react-dom": "https://aistudiocdn.com/react-dom@^19.2.0",
     "aframe": "https://aistudiocdn.com/aframe@^1.7.1",
     "xterm": "https://esm.sh/xterm@5.3.0",
-    "xterm-addon-fit": "https://esm.sh/xterm-addon-fit@0.8.0"
+    "xterm-addon-fit": "https://esm.sh/xterm-addon-fit@0.8.0",
+    "xterm-addon-web-links": "https://esm.sh/xterm-addon-web-links@0.9.0",
+    "xterm/": "https://aistudiocdn.com/xterm@^5.3.0/"
   }
 }
 </script>
 <style>
   :root {
-    --bg-color: #F8F8F8;
+    --bg-color: #F0F0F0;
     --surface-color: #FFFFFF;
     --text-primary: #000000;
-    --text-secondary: #555555;
+    --text-secondary: #666666;
     --border-color: #000000;
-    --accent-color: #000000;
-    --font-heading: 'Space Grotesk', sans-serif;
-    --font-body: 'Inter', sans-serif;
-    --border-width: 2px;
-    --shadow-hard: 4px 4px 0px 0px #000000;
-    --shadow-hover: 2px 2px 0px 0px #000000;
+    --accent-color: #FFD700;
   }
 
   body, html {
@@ -70,528 +90,198 @@
     height: 100%;
     width: 100%;
     background-color: var(--bg-color);
-    background-image: radial-gradient(#000 1px, transparent 1px);
-    background-size: 24px 24px; /* Dot pattern */
     color: var(--text-primary);
-    font-family: var(--font-body);
+    font-family: 'Inter', sans-serif;
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     overflow: hidden;
+    overscroll-behavior: none; /* Prevent pull-to-refresh */
+  }
+  
+  /* Safe area for newer iPhones */
+  .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
   
   #root {
-    height: 100%;
+    height: 100dvh; /* Use dynamic viewport height for mobile browsers */
     display: flex;
     flex-direction: column;
   }
-  
-  .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
 
-  * {
-    box-sizing: border-box;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-heading);
-    text-transform: uppercase;
-    letter-spacing: -0.5px;
-    margin-top: 0;
-  }
-
+  /* Brutalist Card Style */
   .card {
     background-color: #FFFFFF;
-    border: var(--border-width) solid var(--border-color);
-    box-shadow: var(--shadow-hard);
+    border: 2px solid #000000;
+    box-shadow: 4px 4px 0px 0px #000000;
     padding: 1.5rem;
     position: relative;
-    width: 100%;
-    transition: transform 0.1s ease, box-shadow 0.1s ease;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
   
-  /* Neo-Brutalist Button */
+  .card:hover {
+      transform: translate(-1px, -1px);
+      box-shadow: 6px 6px 0px 0px #000000;
+  }
+  
+  /* Brutalist Button */
   .button {
-    background-color: var(--surface-color);
-    color: var(--text-primary);
-    border: var(--border-width) solid var(--border-color);
-    box-shadow: var(--shadow-hard);
-    padding: 10px 20px;
-    font-size: 14px;
-    font-family: var(--font-heading);
+    background-color: #FFFFFF;
+    color: #000000;
+    border: 2px solid #000000;
+    padding: 12px 20px; /* Larger touch target */
+    font-size: 13px;
+    font-family: 'Space Mono', monospace;
     font-weight: 700;
+    text-transform: uppercase;
     cursor: pointer;
     transition: all 0.1s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    text-transform: uppercase;
+    box-shadow: 2px 2px 0px 0px #000000;
+    touch-action: manipulation;
+    user-select: none;
   }
 
   .button:hover:not(:disabled) {
-    transform: translate(1px, 1px);
-    box-shadow: var(--shadow-hover);
-    background-color: #f0f0f0;
+    background-color: #F0F0F0;
+    transform: translate(-1px, -1px);
+    box-shadow: 4px 4px 0px 0px #000000;
   }
   
   .button:active:not(:disabled) {
-    transform: translate(4px, 4px);
-    box-shadow: none;
+    transform: translate(2px, 2px);
+    box-shadow: 0px 0px 0px 0px #000000;
+  }
+  
+  .button.primary {
+    background-color: #000000;
+    color: #FFFFFF;
+    border-color: #000000;
+  }
+  
+  .button.primary:hover:not(:disabled) {
+     background-color: #333333;
   }
   
   .button.secondary {
-    background-color: transparent;
-    border-style: solid;
-    box-shadow: none;
-  }
-  
-  .button.secondary:hover:not(:disabled) {
-    background-color: #f0f0f0;
-    color: #000;
-    box-shadow: var(--shadow-hover);
-    transform: translate(-2px, -2px);
+    background-color: #FFFFFF;
+    color: #000000;
   }
   
   .button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    background-color: #e5e5e5;
+    transform: none;
     box-shadow: none;
-    background-color: #e0e0e0;
-    transform: translate(2px, 2px);
   }
   
-  /* Clean Input Style */
+  /* Input */
   .input-field {
     width: 100%;
-    padding: 10px 14px;
-    font-size: 14px;
-    border: var(--border-width) solid var(--border-color);
+    padding: 12px; /* Larger touch target */
+    font-size: 16px; /* 16px prevents auto-zoom on iOS */
+    border: 2px solid #000000;
     background-color: #FFFFFF;
     color: var(--text-primary);
-    font-family: var(--font-body);
-    font-weight: 500;
+    font-family: 'Space Mono', monospace;
     transition: all 0.2s;
-    border-radius: 0;
+    box-shadow: 2px 2px 0px 0px rgba(0,0,0,0.1);
+    border-radius: 0; /* Brutalist */
+    appearance: none;
   }
 
   .input-field:focus {
     outline: none;
-    box-shadow: var(--shadow-hard);
-    background-color: #fff;
-    z-index: 10;
-    position: relative;
+    box-shadow: 4px 4px 0px 0px #000000;
+    transform: translate(-1px, -1px);
   }
 
-  .input-field::placeholder {
-    color: #999;
-    text-transform: none;
-  }
-  
-  /* Table Styles */
-  .modern-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    font-size: 14px;
-    border: 2px solid black;
-  }
-  
-  .modern-table th {
-    text-align: left;
-    border-bottom: 2px solid black;
-    padding: 12px;
-    color: white;
-    background-color: black;
-    text-transform: uppercase;
-    font-family: var(--font-heading);
-    font-weight: 700;
-  }
-  
-  .modern-table td {
-    padding: 12px;
-    border-bottom: 1px solid #eee;
-    color: var(--text-primary);
-  }
-  
-  .modern-table tr:last-child td {
-    border-bottom: none;
-  }
-
-  /* Range Input Styling */
-  input[type=range] {
-    -webkit-appearance: none;
-    width: 100%;
-    background: transparent;
-    margin: 10px 0;
-  }
-
-  input[type=range]::-webkit-slider-runnable-track {
-    width: 100%;
-    height: 8px;
-    cursor: pointer;
-    background: #FFFFFF;
-    border: 2px solid #000000;
-    box-shadow: 2px 2px 0px #000000;
-  }
-
-  input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    height: 24px;
-    width: 12px;
-    background: #000000;
-    cursor: pointer;
-    margin-top: -10px; /* Centers thumb on track */
-    border: 2px solid #000000;
-    box-shadow: none;
-  }
-
-  input[type=range]:focus {
-    outline: none;
-  }
-
-  /* Scrollbar */
+  /* Custom Scrollbar */
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #fff;
-    border-left: 2px solid #000;
-    border-top: 2px solid #000;
+    background: #f0f0f0;
   }
   ::-webkit-scrollbar-thumb {
     background: #000;
-    border: 2px solid #fff;
+    border-radius: 0;
   }
   ::-webkit-scrollbar-thumb:hover {
     background: #333;
   }
-
-  .blink {
-      animation: blinker 1s linear infinite;
+  
+  /* Utilities */
+  .no-scrollbar::-webkit-scrollbar {
+      display: none;
   }
-  @keyframes blinker {
-      50% { opacity: 0; }
+  .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
   }
 
-  /* Draggable Window Glass Effect */
-  .draggable-window {
-      position: absolute;
-      background-color: #FFFFFF; 
-      border: 3px solid #000000;
-      box-shadow: 8px 8px 0px #000000;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      min-width: 200px;
-      min-height: 150px;
+  /* Win95 Style Utilities */
+  .win95-panel {
+    background-color: #c0c0c0;
+    border-top: 2px solid #ffffff;
+    border-left: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+    box-shadow: 1px 1px 0px 0px #000000;
   }
   
-  .title-bar {
-      background-color: #000000;
-      color: #FFFFFF;
-      padding: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      cursor: grab;
-      user-select: none;
-      border-bottom: 3px solid #000000;
-      flex-shrink: 0;
+  .win95-button {
+    background-color: #c0c0c0;
+    border-top: 2px solid #ffffff;
+    border-left: 2px solid #ffffff;
+    border-right: 2px solid #808080;
+    border-bottom: 2px solid #808080;
+    padding: 6px 12px;
+    font-family: 'Space Mono', monospace; /* Modern twist */
+    font-weight: 700;
+    font-size: 12px;
+    color: black;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+  }
+  .win95-button:active {
+     border-top: 2px solid #808080;
+     border-left: 2px solid #808080;
+     border-right: 2px solid #ffffff;
+     border-bottom: 2px solid #ffffff;
+     transform: translate(1px, 1px);
   }
 
-  .title-bar:active {
-      cursor: grabbing;
-  }
-  
-  .title-bar-inactive {
-      background-color: #fff;
-      color: #000;
-      border-bottom: 3px solid #000;
-  }
-  
-  .title-bar-inactive .title-bar-text {
-      opacity: 0.5;
-  }
-
-  .title-bar-text {
-      font-weight: 700;
-      font-family: var(--font-heading);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
+  .win95-text-field {
+    border-top: 2px solid #808080;
+    border-left: 2px solid #808080;
+    border-right: 2px solid #ffffff;
+    border-bottom: 2px solid #ffffff;
+    background-color: #ffffff;
+    padding: 6px;
+    font-family: 'Space Mono', monospace;
+    outline: none;
+    border-radius: 0;
+    font-size: 16px; /* Prevents IOS Zoom */
   }
 
-  .title-bar-controls {
-      display: flex;
-      gap: 6px;
+  .bg-checkerboard {
+    background-image: 
+      linear-gradient(45deg, #e0e0e0 25%, transparent 25%), 
+      linear-gradient(-45deg, #e0e0e0 25%, transparent 25%), 
+      linear-gradient(45deg, transparent 75%, #e0e0e0 75%), 
+      linear-gradient(-45deg, transparent 75%, #e0e0e0 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
   }
-
-  .title-bar-button {
-      width: 20px;
-      height: 20px;
-      background-color: #FFFFFF;
-      color: #000000;
-      border: 2px solid #000000;
-      font-weight: bold;
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      line-height: 1;
-      box-shadow: 2px 2px 0px #000;
-      transition: transform 0.1s;
-  }
-  
-  .title-bar-inactive .title-bar-button {
-     box-shadow: none;
-     border-color: #999;
-     color: #999;
-  }
-
-  .title-bar-button:hover {
-      transform: translate(1px, 1px);
-      box-shadow: 1px 1px 0px #000;
-  }
-  
-  .title-bar-button:active {
-      transform: translate(2px, 2px);
-      box-shadow: none;
-  }
-
-  .window-content {
-      flex: 1;
-      overflow: auto;
-      padding: 0;
-      position: relative;
-      background-color: #fff;
-  }
-
-  /* Resize Handles */
-  .resize-handle { position: absolute; }
-  .resize-handle-e { top: 0; right: 0; bottom: 0; width: 8px; cursor: e-resize; }
-  .resize-handle-s { bottom: 0; left: 0; right: 0; height: 8px; cursor: s-resize; }
-  .resize-handle-se { bottom: 0; right: 0; width: 16px; height: 16px; cursor: se-resize; z-index: 10;}
-
-  /* Desktop Environment */
-  .desktop {
-      height: calc(100% - 40px); /* Taskbar height */
-      position: relative;
-      overflow: hidden;
-      background: transparent;
-  }
-
-  .desktop-icon-grid {
-      display: flex;
-      flex-direction: column;
-      flex-wrap: wrap;
-      align-content: flex-start;
-      height: 100%;
-      padding: 16px;
-      gap: 16px;
-      pointer-events: none;
-  }
-
-  .desktop-icon {
-      width: 88px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      color: #000;
-      cursor: pointer;
-      padding: 8px;
-      pointer-events: auto;
-      background-color: #fff;
-      border: 2px solid black;
-      box-shadow: 4px 4px 0px black;
-      margin-bottom: 16px;
-      transition: transform 0.1s;
-  }
-
-  .desktop-icon:hover {
-      transform: translate(-2px, -2px);
-      box-shadow: 6px 6px 0px black;
-      z-index: 10;
-  }
-  
-  .desktop-icon:active {
-      transform: translate(2px, 2px);
-      box-shadow: 2px 2px 0px black;
-  }
-
-  .desktop-icon img {
-      width: 32px;
-      height: 32px;
-      margin-bottom: 8px;
-  }
-
-  .desktop-icon span {
-      font-size: 11px;
-      font-weight: 700;
-      background: #000;
-      color: #fff;
-      padding: 2px 6px;
-      line-height: 1.2;
-      font-family: var(--font-heading);
-      text-transform: uppercase;
-      width: 100%;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-  }
-
-  /* Taskbar */
-  .taskbar {
-      height: 40px;
-      background-color: #FFFFFF;
-      border-top: 3px solid #000000;
-      display: flex;
-      align-items: center;
-      padding: 0 6px;
-      position: absolute;
-      bottom: 0;
-      width: 100%;
-      z-index: 1000;
-  }
-
-  .start-button {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px 12px;
-      margin-right: 12px;
-      border: 2px solid #000000;
-      background-color: #000000;
-      color: #FFFFFF;
-      font-weight: bold;
-      box-shadow: 2px 2px 0px #555;
-      cursor: pointer;
-      font-family: var(--font-heading);
-      text-transform: uppercase;
-      height: 30px;
-  }
-
-  .start-button:active, .start-button.active {
-      transform: translate(2px, 2px);
-      box-shadow: none;
-      background-color: #fff;
-      color: #000;
-  }
-
-  .taskbar-buttons {
-      flex: 1;
-      display: flex;
-      gap: 6px;
-      overflow-x: auto;
-      height: 100%;
-      align-items: center;
-      padding-right: 10px;
-  }
-
-  .taskbar-button {
-      display: flex;
-      align-items: center;
-      padding: 0 10px;
-      height: 28px;
-      max-width: 180px;
-      border: 2px solid #000000;
-      background-color: #FFFFFF;
-      color: #000000;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      box-shadow: 2px 2px 0px #ccc;
-  }
-
-  .taskbar-button.active {
-      background-color: #000000;
-      color: #FFFFFF;
-      box-shadow: inset 2px 2px 0px #333;
-  }
-  
-  .taskbar-clock {
-      padding: 0 12px;
-      font-weight: 700;
-      border-left: 2px solid #000;
-      font-family: monospace;
-      font-size: 14px;
-      height: 100%;
-      display: flex;
-      align-items: center;
-  }
-  
-  .start-menu {
-      position: absolute;
-      bottom: 43px;
-      left: 6px;
-      width: 280px;
-      background-color: #FFFFFF;
-      border: 3px solid #000000;
-      box-shadow: 8px 8px 0px #000000;
-      display: flex;
-      z-index: 2000;
-  }
-  
-  .start-menu-sidebar {
-      width: 40px;
-      background: #000;
-      color: white;
-      writing-mode: vertical-rl;
-      transform: rotate(180deg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 10px 0;
-      font-family: var(--font-heading);
-      font-size: 24px;
-      font-weight: 900;
-      letter-spacing: 2px;
-  }
-  
-  .start-menu-items {
-      flex: 1;
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      display: flex;
-      flex-direction: column;
-  }
-  
-  .start-menu-item {
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      font-weight: 700;
-      font-size: 14px;
-      border-bottom: 1px solid #eee;
-      transition: background 0.1s;
-  }
-  
-  .start-menu-item:hover {
-      background-color: #000;
-      color: #fff;
-  }
-  
-  .start-menu-separator {
-      height: 2px;
-      background-color: #000;
-      margin: 4px 0;
-  }
-
 </style>
 </head>
   <body>

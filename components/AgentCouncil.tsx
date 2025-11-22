@@ -2,14 +2,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { runAgentCouncil } from '../services/mockApi';
 import { CouncilMessage } from '../types';
+import { translations } from '../utils/translations';
+import CouncilIcon from './icons/CouncilIcon';
 
-const AgentCouncil: React.FC = () => {
+const AgentCouncil: React.FC<{ language: 'ru' | 'en' }> = ({ language }) => {
+    const t = translations[language].council;
+    const comm = translations[language].common;
+
     const [prompt, setPrompt] = useState('');
     const [messages, setMessages] = useState<CouncilMessage[]>([]);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [ideContent, setIdeContent] = useState<string>('# Ожидание кода от Совета ИИ...');
+    const [ideContent, setIdeContent] = useState<string>('# Waiting for agents...');
     const [currentAgent, setCurrentAgent] = useState<string | null>(null);
-    
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -19,40 +23,20 @@ const AgentCouncil: React.FC = () => {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!prompt.trim() || isProcessing) return;
-
         setMessages([]);
-        setIdeContent('# Инициализация среды разработки...\n# Подключение агентов...');
+        setIdeContent('# ...');
         setIsProcessing(true);
-        
-        // Add user message
-        setMessages([{ 
-            id: 'user-prompt', 
-            agentName: 'User', 
-            role: 'Lead', // User acts as client
-            content: prompt, 
-            isFinal: false 
-        }]);
-
+        setMessages([{ id: 'user-prompt', agentName: 'User', role: 'Lead', content: prompt, isFinal: false }]);
         const userRequest = prompt;
         setPrompt('');
-
         try {
-            // Fetch the full script from the AI
             const script = await runAgentCouncil(userRequest);
-            
-            // "Stream" the script to the UI to simulate real-time conversation
             for (const msg of script) {
                 setCurrentAgent(msg.role);
-                
-                // Simulate typing delay based on content length
-                const delay = Math.min(Math.max(msg.content.length * 20, 1000), 3000);
+                const delay = Math.min(Math.max(msg.content.length * 20, 800), 2000);
                 await new Promise(r => setTimeout(r, delay));
-
                 setMessages(prev => [...prev, msg]);
-                
-                if (msg.codeSnippet) {
-                    setIdeContent(msg.codeSnippet);
-                }
+                if (msg.codeSnippet) setIdeContent(msg.codeSnippet);
             }
         } catch (err) {
             console.error(err);
@@ -61,115 +45,86 @@ const AgentCouncil: React.FC = () => {
             setCurrentAgent(null);
         }
     };
-
-    // Strict B&W/Grayscale for roles
-    const getRoleColor = (role: string) => {
-        return '#FFFFFF';
-    };
     
-    const getRoleLabel = (role: string) => {
-        switch (role) {
-            case 'Architect': return '[ARCHITECT]';
-            case 'Critic': return '[CRITIC]';
-            case 'Coder': return '[CODER]';
-            case 'Researcher': return '[RESEARCHER]';
-            case 'Lead': return '[LEAD]';
-            default: return '[USER]';
+    const getRoleColor = (role: string) => {
+        switch(role) {
+            case 'Architect': return 'text-purple-600 bg-purple-50';
+            case 'Coder': return 'text-blue-600 bg-blue-50';
+            case 'Critic': return 'text-red-600 bg-red-50';
+            default: return 'text-gray-600 bg-gray-50';
         }
     }
 
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', height: '100%', gap: '24px' }}>
-            {/* LEFT: COUNCIL CHAT */}
-            <div className="card flex flex-col h-full p-0 overflow-hidden">
-                <div className="p-4 border-b border-white bg-black flex justify-between items-center">
-                    <h2 className="text-lg font-bold uppercase tracking-widest flex items-center gap-2">
-                        <span>🤖</span> СОВЕТ ИИ
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full overflow-hidden">
+            {/* Discussion Panel */}
+            <div className="card flex flex-col flex-1 !p-0 overflow-hidden shadow-sm min-h-[50%] lg:min-h-0 order-2 lg:order-1">
+                <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-white shrink-0">
+                    <h2 className="text-xs font-bold uppercase tracking-widest flex items-center gap-2 font-mono text-gray-400">
+                        <CouncilIcon className="w-4 h-4"/> {t.title}
                     </h2>
-                    {isProcessing && currentAgent && (
-                        <span className="text-xs blink">
-                            {currentAgent} печатает...
-                        </span>
-                    )}
+                    {isProcessing && currentAgent && <span className="text-[10px] font-bold text-blue-600 animate-pulse bg-blue-50 px-2 py-1 rounded">ACTIVE: {currentAgent}</span>}
                 </div>
                 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 lg:space-y-6 bg-white">
                     {messages.length === 0 && (
-                        <div className="text-center text-white mt-10 opacity-50">
-                            <p>Совет ИИ готов к работе.</p>
-                            <p className="text-xs mt-2">"Архитектор", "Критик", "Кодер", "Исследователь"</p>
+                        <div className="h-full flex flex-col items-center justify-center opacity-30 gap-4">
+                            <CouncilIcon className="w-12 h-12 lg:w-16 lg:h-16 text-gray-300"/>
+                            <p className="font-mono text-xs text-gray-400 uppercase tracking-widest">{t.idle}</p>
                         </div>
                     )}
                     {messages.map((msg) => (
-                        <div key={msg.id} className={`flex flex-col ${msg.agentName === 'User' ? 'items-end' : 'items-start'}`}>
+                        <div key={msg.id} className={`flex flex-col ${msg.agentName === 'User' ? 'items-end' : 'items-start'} animate-fade-in`}>
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border border-transparent ${getRoleColor(msg.role)}`}>
+                                    {msg.agentName}
+                                </span>
+                            </div>
                             <div 
-                                className="max-w-[90%] border border-white p-3 bg-black relative"
-                                style={{ 
-                                    borderColor: msg.isFinal ? '#FFFFFF' : '#666666',
-                                    borderLeftWidth: msg.agentName !== 'User' ? '4px' : '1px'
-                                }}
+                                className={`max-w-[90%] p-3 lg:p-4 text-sm border shadow-sm ${
+                                    msg.agentName === 'User' 
+                                    ? 'bg-black text-white border-black rounded-l-xl rounded-tr-xl' 
+                                    : 'bg-white text-gray-800 border-gray-200 rounded-r-xl rounded-tl-xl'
+                                }`}
                             >
-                                <div className="flex justify-between items-center mb-1 gap-4">
-                                    <span className="font-bold text-xs uppercase text-white">
-                                        {msg.agentName} <span className="opacity-50">{getRoleLabel(msg.role)}</span>
-                                    </span>
-                                </div>
-                                <p className="text-sm whitespace-pre-wrap text-white leading-relaxed font-mono">
-                                    {msg.content}
-                                </p>
-                                {msg.isFinal && (
-                                    <div className="mt-2 text-[10px] uppercase text-white border-t border-white pt-1 font-bold">
-                                        ★ Финальное решение
-                                    </div>
-                                )}
+                                <p className="whitespace-pre-wrap leading-relaxed font-mono text-xs lg:text-sm">{msg.content}</p>
                             </div>
                         </div>
                     ))}
                     <div ref={messagesEndRef} />
                 </div>
-
-                <form onSubmit={handleSubmit} className="p-4 border-t border-white bg-black flex gap-2">
-                    <input
-                        type="text"
-                        value={prompt}
-                        onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="Опишите задачу для Совета..."
-                        className="input-field flex-1"
+                
+                <form onSubmit={handleSubmit} className="p-3 lg:p-4 border-t border-gray-100 bg-gray-50 flex gap-2 shrink-0">
+                    <input 
+                        type="text" 
+                        value={prompt} 
+                        onChange={(e) => setPrompt(e.target.value)} 
+                        placeholder={t.placeholder} 
+                        className="input-field flex-1 !bg-white border-gray-200 text-sm" 
                         disabled={isProcessing}
                     />
-                    <button type="submit" className="button" disabled={isProcessing || !prompt.trim()}>
-                        {isProcessing ? '...' : 'START'}
+                    <button type="submit" className="button bg-black text-white border-black hover:bg-gray-800 shadow-none px-4" disabled={isProcessing || !prompt.trim()}>
+                        {isProcessing ? '...' : 'SEND'}
                     </button>
                 </form>
             </div>
 
-            {/* RIGHT: IDE / WORKSPACE */}
-            <div className="card flex flex-col h-full p-0 overflow-hidden">
-                <div className="p-4 border-b border-white bg-black flex justify-between items-center">
-                    <h2 className="text-lg font-bold uppercase tracking-widest flex items-center gap-2">
-                        <span>💻</span> IDE / TERMINAL
-                    </h2>
-                    <div className="flex gap-2">
-                        <div className="w-3 h-3 rounded-full border border-white"></div>
-                        <div className="w-3 h-3 rounded-full border border-white"></div>
-                        <div className="w-3 h-3 rounded-full border border-white bg-white"></div>
+            {/* IDE Panel */}
+            <div className="card flex flex-col h-1/3 lg:h-full lg:w-5/12 !p-0 overflow-hidden shadow-sm shrink-0 border border-black bg-[#1e1e1e] order-1 lg:order-2">
+                <div className="p-2 lg:p-3 border-b border-gray-700 bg-[#1e1e1e] text-gray-400 flex justify-between items-center shrink-0">
+                    <h2 className="text-[10px] font-bold uppercase tracking-widest font-mono">LIVE CODE</h2>
+                    <div className="flex gap-1.5 opacity-50">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                        <div className="w-2 h-2 rounded-full bg-green-500"></div>
                     </div>
                 </div>
-                <div className="flex-1 bg-black p-4 overflow-auto font-mono text-sm relative group">
-                    <textarea
-                        readOnly
-                        value={ideContent}
-                        className="w-full h-full bg-transparent border-none resize-none focus:outline-none text-white"
-                        style={{ fontFamily: "'Fira Code', 'Courier New', monospace", lineHeight: '1.5' }}
+                <div className="flex-1 bg-[#1e1e1e] p-3 lg:p-4 overflow-auto font-mono text-xs relative group">
+                    <textarea 
+                        readOnly 
+                        value={ideContent} 
+                        className="w-full h-full bg-transparent border-none resize-none focus:outline-none text-green-400 font-typewriter leading-loose custom-scrollbar"
                     />
-                    <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="text-xs text-gray-500">READ ONLY MODE</span>
-                    </div>
-                </div>
-                <div className="p-2 bg-black border-t border-white text-[10px] font-mono text-white flex gap-4">
-                    <span>STATUS: {isProcessing ? 'EXECUTING_AGENTS' : 'IDLE'}</span>
-                    <span>MEM: 64MB</span>
-                    <span>CPU: 12%</span>
                 </div>
             </div>
         </div>

@@ -23,7 +23,8 @@ const Login: React.FC<LoginProps> = ({ onAdminLoginSuccess, onUserLoginSuccess, 
 
     const handleAdminSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (adminLogin === 'admin' && adminPassword === 'admin') {
+        // Updated Credentials per request
+        if (adminLogin === 'parker' && adminPassword === 'Aibusu07') {
             onAdminLoginSuccess();
         } else {
             setAdminError(t.access_denied);
@@ -89,7 +90,7 @@ const Login: React.FC<LoginProps> = ({ onAdminLoginSuccess, onUserLoginSuccess, 
 
                 <h1 style={{ fontSize: '42px', fontWeight: 900, marginBottom: '30px', lineHeight: 1 }}>
                     TELE.OS
-                    <span style={{ fontSize: '14px', display: 'block', fontWeight: 400, fontFamily: 'var(--font-body)', marginTop: '5px' }}>SECURE GATEWAY v2.1</span>
+                    <span style={{ fontSize: '14px', display: 'block', fontWeight: 400, fontFamily: 'var(--font-body)', marginTop: '5px' }}>SECURE GATEWAY v2.5</span>
                 </h1>
 
                 <div style={{ display: 'flex', marginBottom: '30px', gap: '10px' }}>
