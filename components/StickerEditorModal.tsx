@@ -44,7 +44,8 @@ const StickerEditorModal: React.FC<StickerEditorModalProps> = ({ stickerData, on
 
         try {
             const base64 = currentImage.includes(',') ? currentImage.split(',')[1] : currentImage;
-            const result = await editImageWithAI(base64, `Sticker refinement: ${prompt}. Keep white background.`);
+            // Allow full user control without enforcing "white background"
+            const result = await editImageWithAI(base64, `Edit instruction: ${prompt}. Maintain the character consistency and sticker style.`);
             setCurrentImage(`data:image/png;base64,${result.image}`);
             setChatHistory(prev => [...prev, { sender: 'ai', text: comm.success }]);
         } catch (err) {
