@@ -5,7 +5,6 @@ import { FitAddon } from 'xterm-addon-fit';
 import { WebLinksAddon } from 'xterm-addon-web-links';
 import { initSSHConnection } from '../services/mockApi';
 import { translations } from '../utils/translations';
-import 'xterm/css/xterm.css';
 
 // Mobile Keyboard Helper Keys
 const MOBILE_KEYS = [
